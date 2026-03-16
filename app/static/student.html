@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>考务工作人员报名 - 考务报名管理系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: "Microsoft YaHei", sans-serif;
+            background: linear-gradient(120deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 2rem 0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 20px rgba(0, 0, 0, 0.12);
+        }
+
+        .btn-custom {
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 0.8rem 2rem;
+            font-size: 1rem;
+        }
+
+        .btn-custom:hover {
+            background: #2980b9;
+        }
+
+        .btn-danger-custom {
+            background: #e74c3c;
+            color: white;
+            border: none;
+        }
+
+        .btn-danger-custom:hover {
+            background: #c0392b;
+        }
+
+        .tip {
+            background: rgba(52, 152, 219, 0.1);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        .form-label {
+            font-weight: 500;
+        }
+
+        .modal-content {
+            border-radius: 12px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header class="header text-center">
+        <div class="container">
+            <h1 class="mb-3">考务报名管理系统</h1>
+            <p class="lead">学生报名入口</p>
+        </div>
+    </header>
+
+    <div class="container mt-5 mb-5">
+        <div class="tip">
+            学号8位数字，手机号11位数字，QQ号纯数字（用于接收取消报名验证码）
+        </div>
+
+        <div class="card p-5 mb-4">
+            <h3 class="mb-4">报名入口</h3>
+            <form id="regForm">
+                <div class="mb-3">
+                    <label class="form-label">考试项目</label>
+                    <select name="recruitment_id" id="examSelect" class="form-select" required></select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">学号</label>
+                    <input type="text" name="student_id" class="form-control" required placeholder="8位数字">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">姓名</label>
+                    <input type="text" name="name" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">手机号</label>
+                    <input type="tel" name="phone" class="form-control" required placeholder="11位数字">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">QQ号</label>
+                    <input type="text" name="qq" class="form-control" required placeholder="纯数字，用于接收验证码">
+                </div>
+                <div class="mb-4">
+                    <label class="form-label d-block">是否有经验</label>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="has_experience" value="true" required>
+                        <label class="form-check-label">有</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="has_experience" value="false" checked>
+                        <label class="form-check-label">无</label>
+                    </div>
+                </div>
+                <button type="submit" class="btn-custom w-100">提交报名</button>
+            </form>
+        </div>
+
+        <div class="card p-5">
+            <h3 class="mb-4">查询我的报名记录</h3>
+            <form id="myRegForm" class="mb-4">
+                <div class="mb-3">
+                    <label class="form-label">学号</label>
+                    <input type="text" id="myStudentId" class="form-control" placeholder="8位数字学号" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">手机号</label>
+                    <input type="text" id="myPhone" class="form-control" placeholder="11位数字手机号" required>
+                </div>
+                <button type="submit" class="btn-custom w-100">查询</button>
+            </form>
+            <div id="myList"></div>
+        </div>
+    </div>
+
+    <!-- 取消报名弹窗 -->
+    <div class="modal fade" id="cancelModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">取消报名验证</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="cancelRegId">
+                    <div class="mb-3">
+                        <label class="form-label">QQ邮箱验证码</label>
+                        <input type="text" id="verifyCode" class="form-control" placeholder="输入收到的6位验证码" required>
+                    </div>
+                    <button type="button" id="sendCodeBtn" class="btn-custom w-100 mb-3">发送验证码到QQ邮箱</button>
+                    <button type="button" id="confirmCancelBtn" class="btn-custom w-100">确认取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-dark text-white text-center py-3 fixed-bottom">
+        <div class="container">
+            <p class="mb-0">© 2026 考务报名管理系统 - 所有权利保留</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 修复：全局变量保存用户已选中的考试ID和表单输入值
+        let selectedExamId = '';
+        let formInputValues = {
+            student_id: '',
+            name: '',
+            phone: '',
+            qq: '',
+            has_experience: 'false'
+        };
+
+        // 修复：优化loadExamList，保留用户输入状态
+        async function loadExamList() {
+            try {
+                const res = await fetch("/api/recruit/list");
+                const list = await res.json();
+                const select = document.getElementById("examSelect");
+
+                // 1. 保存当前选中状态（刷新前）
+                const currentSelectedId = select.value || selectedExamId;
+
+                // 2. 刷新下拉框选项
+                select.innerHTML = "<option value=''>请选择考试</option>";
+                list.forEach(item => {
+                    const opt = document.createElement("option");
+                    opt.value = item.id;
+                    opt.textContent = `${item.exam_name}（需${item.need_num}人/剩${item.remaining}人，截止：${item.end_time}）`;
+                    select.appendChild(opt);
+                });
+
+                // 3. 恢复选中状态（如果该考试仍存在）
+                if (currentSelectedId) {
+                    const optionExists = Array.from(select.options).some(opt => opt.value === currentSelectedId);
+                    if (optionExists) {
+                        select.value = currentSelectedId;
+                        selectedExamId = currentSelectedId;
+                    } else {
+                        // 考试已被删除/关闭，提示用户
+                        selectedExamId = '';
+                        alert("你选中的考试项目已失效，请重新选择");
+                    }
+                }
+
+                // 4. 恢复表单输入值
+                document.querySelector('input[name="student_id"]').value = formInputValues.student_id;
+                document.querySelector('input[name="name"]').value = formInputValues.name;
+                document.querySelector('input[name="phone"]').value = formInputValues.phone;
+                document.querySelector('input[name="qq"]').value = formInputValues.qq;
+                document.querySelector(`input[name="has_experience"][value="${formInputValues.has_experience}"]`).checked = true;
+
+            } catch (err) {
+                console.error("加载考试列表失败:", err);
+                alert("加载考试列表失败，请刷新页面");
+            }
+        }
+
+        // 修复：监听表单输入，实时保存值
+        function initFormInputListener() {
+            const examSelect = document.getElementById("examSelect");
+            if (examSelect) {
+                examSelect.addEventListener('change', function () {
+                    selectedExamId = this.value;
+                });
+            } else {
+                console.warn("未找到 #examSelect");
+            }
+
+            const studentIdInput = document.querySelector('input[name="student_id"]');
+            if (studentIdInput) studentIdInput.addEventListener('input', e => formInputValues.student_id = e.target.value);
+
+            const nameInput = document.querySelector('input[name="name"]');
+            if (nameInput) nameInput.addEventListener('input', e => formInputValues.name = e.target.value);
+
+            const phoneInput = document.querySelector('input[name="phone"]');
+            if (phoneInput) phoneInput.addEventListener('input', e => formInputValues.phone = e.target.value);
+
+            const qqInput = document.querySelector('input[name="qq"]');
+            if (qqInput) qqInput.addEventListener('input', e => formInputValues.qq = e.target.value);
+
+            document.querySelectorAll('input[name="has_experience"]').forEach(radio => {
+                radio.addEventListener('change', function () {
+                    formInputValues.has_experience = this.value;
+                });
+            });
+        }
+
+        // 报名提交逻辑
+        document.getElementById("regForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const btn = e.target.querySelector("button");
+            btn.disabled = true;
+            btn.textContent = "提交中...";
+
+            const formData = new FormData(e.target);
+            const qq = formData.get('qq');
+            if (!/^\d+$/.test(qq)) {
+                alert("QQ号必须是纯数字！");
+                btn.disabled = false;
+                btn.textContent = "提交报名";
+                return;
+            }
+
+            try {
+                const res = await fetch("/api/reg", { method: "POST", body: formData });
+                let data;
+                if (res.ok) {
+                    data = await res.json();
+                    alert(data.msg || "报名成功");
+                    // 报名成功后清空保存的状态
+                    selectedExamId = '';
+                    formInputValues = {
+                        student_id: '',
+                        name: '',
+                        phone: '',
+                        qq: '',
+                        has_experience: 'false'
+                    };
+                    e.target.reset(); // 清空表单
+                    loadExamList();
+                } else {
+                    const errData = await res.json();
+                    alert(errData.detail || "报名失败");
+                    data = errData;
+                }
+            } catch (err) {
+                alert("网络错误，请重试");
+                console.error("报名失败:", err);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "提交报名";
+            }
+        });
+
+        // 查询我的报名
+        document.getElementById("myRegForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const submitBtn = e.target.querySelector('button');
+            submitBtn.disabled = true;
+            submitBtn.textContent = "查询中...";
+
+            const formData = new FormData();
+            formData.append("student_id", document.getElementById("myStudentId").value);
+            formData.append("phone", document.getElementById("myPhone").value);
+
+            try {
+                const res = await fetch("/api/my-registrations", { method: "POST", body: formData });
+                const data = await res.json();
+                if (data.code === 0) {
+                    let html = "";
+
+                    if (data.data.length === 0) {
+                        html = '<div class="alert alert-info text-center py-3 mb-0">暂无报名记录</div>';
+                    } else {
+                        const count = data.data.length;
+                        html += `<div class="mb-3 fw-bold">查询到你有 <span class="text-primary">${count}</span> 个成功报名项目：</div>`;
+
+                        html += '<ol class="list-group list-group-numbered mb-3">';
+
+                        data.data.forEach((item) => {
+                            html += `
+                                <li class="list-group-item">
+                                    <div class="row mb-2">
+                                        <div class="col-3 text-muted small">考试项目</div>
+                                        <div class="col-9 fw-bold">${item.exam_name}</div>
+                                    </div>
+                                    <div class="row mb-1">
+                                        <div class="col-3 text-muted small">报名时间</div>
+                                        <div class="col-9">${item.create_time}</div>
+                                    </div>
+                                    <div class="row mb-2">
+                                        <div class="col-3 text-muted small">QQ号</div>
+                                        <div class="col-9">${item.qq}</div>
+                                    </div>
+                                    ${item.can_cancel ?
+                                        `<button class="btn btn-danger btn-sm" onclick="openCancelModal(${item.reg_id}, ${item.recruit_id}, '${item.qq}')">取消报名</button>` :
+                                        '<span class="badge bg-secondary">已截止，无法取消</span>'
+                                    }
+                                </li>
+                            `;
+                        });
+
+                        html += '</ol>';
+                    }
+
+                    document.getElementById("myList").innerHTML = html;
+
+                }
+            } catch (err) {
+                alert("查询失败，请重试");
+                console.error(err);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = "查询";
+            }
+        });
+
+        // 取消报名弹窗相关
+        const modal = document.getElementById("cancelModal");
+        let currentCancelData = { regId: null, recruitId: null, qq: null };
+
+        const cancelModalInstance = new bootstrap.Modal(document.getElementById('cancelModal'));
+
+        function openCancelModal(regId, recruitId, qq) {
+            currentCancelData = { regId, recruitId, qq };
+            document.getElementById("cancelRegId").value = regId;
+            document.getElementById("verifyCode").value = "";
+            cancelModalInstance.show();
+        }
+
+        /*document.getElementById("closeModalBtn").addEventListener("click", () => {
+            modal.style.display = "none";
+        });*/
+
+        // 发送验证码
+        document.getElementById("sendCodeBtn").addEventListener("click", async () => {
+            const { regId, recruitId, qq } = currentCancelData;
+            const email = `${qq}@qq.com`;
+            const btn = document.getElementById("sendCodeBtn");
+
+            btn.disabled = true;
+            btn.textContent = "发送中...";
+
+            const formData = new FormData();
+            formData.append("reg_id", regId);
+            formData.append("recruit_id", recruitId);
+            formData.append("email", email);
+
+            try {
+                const res = await fetch("/api/send-verify-code", {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    alert("验证码已发送到你的QQ邮箱，请查收（有效期5分钟）");
+                    let countdown = 60;
+                    btn.textContent = `重新发送(${countdown}s)`;
+                    const timer = setInterval(() => {
+                        countdown--;
+                        btn.textContent = `重新发送(${countdown}s)`;
+                        if (countdown <= 0) {
+                            clearInterval(timer);
+                            btn.disabled = false;
+                            btn.textContent = "发送验证码到QQ邮箱";
+                        }
+                    }, 1000);
+                } else {
+                    alert(data.detail || "发送验证码失败");
+                    btn.disabled = false;
+                    btn.textContent = "发送验证码到QQ邮箱";
+                }
+            } catch (err) {
+                alert("网络错误，发送失败");
+                console.error(err);
+                btn.disabled = false;
+                btn.textContent = "发送验证码到QQ邮箱";
+            }
+        });
+
+        // 确认取消报名
+        document.getElementById("confirmCancelBtn").addEventListener("click", async () => {
+            const regId = currentCancelData.regId;
+            const code = document.getElementById("verifyCode").value.trim();
+            const btn = document.getElementById("confirmCancelBtn");
+
+            if (!code || code.length !== 6 || !/^\d{6}$/.test(code)) {
+                alert("请输入正确的6位数字验证码！");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = "处理中...";
+
+            try {
+                const formData = new FormData();
+                formData.append("reg_id", regId);
+                formData.append("verify_code", code);
+                const res = await fetch("/api/cancel-reg", {
+                    method: "POST",
+                    body: formData,
+                    credentials: "same-origin"
+                });
+
+                if (res.ok) {
+                    alert("取消报名成功！");
+                    modal.style.display = "none";
+                    document.getElementById("myRegForm").dispatchEvent(new Event('submit'));
+                    loadExamList();
+                } else {
+                    const data = await res.json();
+                    alert(data?.detail || `取消失败（状态码 ${res.status}）`);
+                }
+            } catch (err) {
+                alert("操作失败：" + (err.message || "网络或服务器错误"));
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "确认取消";
+            }
+        });
+
+        // 初始化
+        // 把原来的这三行
+        // initFormInputListener();
+        // loadExamList();
+        // setInterval(loadExamList, 30000);
+
+        // 全部替换成：
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initFormInputListener();
+            loadExamList();
+            setInterval(loadExamList, 30000);
+        });
+    </script>
+</body>
+
+</html>

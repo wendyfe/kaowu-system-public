@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+python-multipart
+aiofiles
+itsdangerous
+pandas
+openpyxl
+jinja2>=3.1.2
