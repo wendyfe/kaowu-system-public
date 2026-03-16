@@ -1,0 +1,6 @@
+# macOS 系统文件
+.DS_Store
+**/.DS_Store   # 忽略所有子目录里的 .DS_Store（更彻底）
+.AppleDouble
+.LSOverride
+._*
