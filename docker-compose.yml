@@ -13,10 +13,7 @@ services:
       - TZ=Asia/Shanghai
       - KAOWU_ADMIN_USERNAME=admin
       - KAOWU_ADMIN_PASSWORD=1234             # 建议改成复杂。密码
-      #- SMTP_USER=wendy12478@gmail.com
-      #- SMTP_PASS=tpswexgshlnnvrpe
-      #- SMTP_HOST=smtp.gmail.com
-      - SMTP_USER=2978324843@qq.com
-      - SMTP_PASS=wcviymzzjculdehc
+      - SMTP_USER=你的QQ或gmail
+      - SMTP_PASS=16位专用密码
       - SMTP_HOST=smtp.qq.com
       - SMTP_PORT=465                         # ← 保持 465
