@@ -12,7 +12,7 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - KAOWU_ADMIN_USERNAME=admin
-      - KAOWU_ADMIN_PASSWORD=1234             # 建议改成复杂密码
+      - KAOWU_ADMIN_PASSWORD=1234             # 建议改成复杂。密码
       #- SMTP_USER=wendy12478@gmail.com
       #- SMTP_PASS=tpswexgshlnnvrpe
       #- SMTP_HOST=smtp.gmail.com
