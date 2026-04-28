@@ -64,3 +64,7 @@ body {
 .modal-content {
     border-radius: 12px;
 }
+
+.toast-container {
+    margin-top: 60px;
+}

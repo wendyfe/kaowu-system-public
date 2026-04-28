@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>考务招募管理后台 - 考务报名管理系统</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link href="/static/style.css" rel="stylesheet">
     <style>
         .btn-danger {
@@ -22,9 +23,140 @@
         tr:hover {
             background-color: #f8f9fa;
         }
+        /* 侧滑面板卡片式分组 */
+        .offcanvas-body .form-section {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+        }
+        .offcanvas-body .form-section .form-label {
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #495057;
+            margin-bottom: 0.4rem;
+        }
+        /* Flatpickr 与 Bootstrap 风格统一 */
+        .flatpickr-input {
+            background-color: #fff !important;
+        }
+        .flatpickr-calendar {
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important;
+            border-radius: 10px !important;
+            border: none !important;
+            margin-top: 4px;
+        }
+        .flatpickr-day.selected,
+        .flatpickr-day.startRange,
+        .flatpickr-day.endRange,
+        .flatpickr-day.inRange {
+            background: #3498db !important;
+            border-color: #3498db !important;
+        }
+        .flatpickr-day.today {
+            border-color: #3498db !important;
+        }
+        .flatpickr-current-month .flatpickr-monthDropdown-months:hover {
+            background: transparent !important;
+        }
+        /* 编辑面板 header */
+        .offcanvas-header {
+            border-bottom: 1px solid #e9ecef;
+            padding: 1.25rem 1.5rem;
+        }
+        .offcanvas-body {
+            padding: 1.5rem;
+        }
+        /* 表格操作列按钮式链接 */
+        .table .action-link {
+            display: inline-block;
+            padding: 0.25rem 0.6rem;
+            margin-right: 0.35rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            text-decoration: none;
+            transition: background 0.15s;
+        }
+        .table .action-link:last-child {
+            margin-right: 0;
+        }
+        .table .action-link:hover {
+            background: #e9ecef;
+        }
+        .table .action-link.text-danger:hover {
+            background: #fef2f2;
+        }
     </style>
 </head>
 <body>
+
+    <!-- Toast 提示容器 -->
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 9999">
+        <div id="toast" class="toast align-items-center border-0" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body" id="toastMessage"></div>
+                <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="关闭"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 确认操作模态框 -->
+    <div class="modal fade" id="confirmModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirmTitle">确认操作</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="confirmMessage"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-danger" id="confirmBtn">确定</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑招募侧滑面板 -->
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="editOffcanvas">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-1" style="vertical-align: -3px">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+                编辑招募
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+        </div>
+        <div class="offcanvas-body">
+            <div class="form-section">
+                <div class="mb-3">
+                    <label class="form-label">考试名称</label>
+                    <input type="text" class="form-control form-control-lg" id="editExamName" placeholder="如：2026年上半年四六级考试">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">招募人数</label>
+                    <input type="number" class="form-control form-control-lg" id="editNeedNum" min="1" placeholder="请输入人数">
+                </div>
+                <div class="mb-0">
+                    <label class="form-label">截止时间</label>
+                    <input type="text" class="form-control form-control-lg" id="editEndTime" placeholder="点击选择日期和时间">
+                    <div class="form-text mt-2">留空表示不限制截止时间</div>
+                </div>
+            </div>
+
+            <div class="d-grid gap-2 mt-4" style="position: sticky; bottom: 0; background: #fff; padding-top: 1rem;">
+                <button class="btn btn-primary btn-lg" id="editConfirmBtn">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -3px; margin-right: 4px">
+                        <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    保存修改
+                </button>
+                <button class="btn btn-outline-secondary btn-lg" data-bs-dismiss="offcanvas">取消</button>
+            </div>
+        </div>
+    </div>
 
     <header class="header text-center">
         <div class="container">
@@ -37,37 +169,51 @@
             <button class="btn btn-danger" onclick="logout()">退出登录</button>
         </div>
 
+        <!-- 发布新招募 -->
         <div class="card p-5">
-            <h3 class="mb-4">发布新招募</h3>
+            <h3 class="mb-4">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3498db" stroke-width="2" style="vertical-align: -4px; margin-right: 6px">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                发布新招募
+            </h3>
             <form id="addRecruitForm">
-                <div class="mb-3">
-                    <label class="form-label">考试名称</label>
-                    <input type="text" name="exam_name" class="form-control" required placeholder="如：2026年上半年四六级考试">
+                <div class="row g-4">
+                    <div class="col-md-5">
+                        <label class="form-label">考试名称</label>
+                        <input type="text" name="exam_name" class="form-control form-control-lg" required placeholder="如：2026年上半年四六级考试">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">招募人数</label>
+                        <input type="number" name="need_num" class="form-control form-control-lg" min="1" required placeholder="请输入人数">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">截止时间 <span class="text-muted fw-normal">（可选）</span></label>
+                        <input type="text" class="form-control form-control-lg" id="publishEndTime" placeholder="点击选择截止时间">
+                    </div>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label">招募人数</label>
-                    <input type="number" name="need_num" class="form-control" min="1" required placeholder="请输入人数">
-                </div>
-                <div class="mb-4">
-                    <label class="form-label">结束时间（北京时间，可选）</label>
-                    <input type="datetime-local" name="end_time" class="form-control">
-                </div>
-                <button type="submit" class="btn-custom">发布招募</button>
+                <button type="submit" class="btn-custom mt-4">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -3px; margin-right: 4px">
+                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    发布招募
+                </button>
             </form>
         </div>
 
+        <!-- 招募列表 -->
         <div class="card p-5">
             <h3 class="mb-4">已发布招募列表</h3>
             <div class="table-responsive">
-                <table class="table table-hover" id="recruitTable">
+                <table class="table table-hover align-middle" id="recruitTable">
                     <thead>
                         <tr>
-                            <th>考试名称</th>
-                            <th>需招募人数</th>
-                            <th>已报名人数</th>
-                            <th>结束时间</th>
-                            <th>状态</th>
-                            <th>操作</th>
+                            <th style="width:25%">考试名称</th>
+                            <th style="width:10%">需招募人数</th>
+                            <th style="width:12%">已报名人数</th>
+                            <th style="width:18%">结束时间</th>
+                            <th style="width:10%">状态</th>
+                            <th style="width:25%">操作</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -83,65 +229,203 @@
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/zh.js"></script>
     <script>
-        // 加载招募列表（使用 DOM 创建，避免字符串转义问题）
+        // ========== 工具函数 ==========
+
+        function showToast(message, type) {
+            const toastEl = document.getElementById('toast');
+            const toastBody = document.getElementById('toastMessage');
+            toastBody.textContent = message;
+            toastEl.className = 'toast align-items-center border-0 text-bg-' + (type || 'info');
+            bootstrap.Toast.getOrCreateInstance(toastEl).show();
+        }
+
+        function showConfirm(title, message) {
+            return new Promise((resolve) => {
+                document.getElementById('confirmTitle').textContent = title;
+                document.getElementById('confirmMessage').textContent = message;
+                const btn = document.getElementById('confirmBtn');
+                const modalEl = document.getElementById('confirmModal');
+                const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+                btn.onclick = () => {
+                    modal.hide();
+                    resolve(true);
+                };
+                modalEl.addEventListener('hidden.bs.modal', () => resolve(false), { once: true });
+                modal.show();
+            });
+        }
+
+        // ========== Flatpickr 初始化 ==========
+
+        const fpOptions = {
+            enableTime: true,
+            time_24hr: true,
+            dateFormat: 'Y-m-d H:i',
+            locale: 'zh',
+            allowInput: true,
+            minuteIncrement: 5,
+        };
+
+        // 发布表单日期选择器
+        const publishPicker = flatpickr('#publishEndTime', {
+            ...fpOptions,
+            placeholder: '点击选择截止时间',
+        });
+
+        // 编辑面板日期选择器
+        const editPicker = flatpickr('#editEndTime', {
+            ...fpOptions,
+            placeholder: '点击选择截止时间',
+        });
+
+        // ========== 编辑招募（侧滑面板） ==========
+
+        let currentEditId = null;
+        let currentEditOldData = null;
+        const editOffcanvas = new bootstrap.Offcanvas(document.getElementById('editOffcanvas'));
+
+        function openEditPanel(id, oldName, oldNum, oldEndTime) {
+            currentEditId = id;
+            currentEditOldData = { name: oldName, num: oldNum, endTime: oldEndTime };
+
+            document.getElementById('editExamName').value = oldName;
+            document.getElementById('editNeedNum').value = oldNum;
+
+            // 设置日期选择器的值（后端格式 "YYYY-MM-DD HH:MM" → flatpickr 自动解析）
+            editPicker.setDate(oldEndTime && oldEndTime.trim() ? oldEndTime : '', false);
+
+            editOffcanvas.show();
+        }
+
+        document.getElementById('editConfirmBtn').addEventListener('click', async () => {
+            const newName = document.getElementById('editExamName').value.trim();
+            const newNumStr = document.getElementById('editNeedNum').value;
+            const newEndTime = editPicker.input.value.trim() || null;
+
+            if (!newName) {
+                showToast('考试名称不能为空', 'warning');
+                document.getElementById('editExamName').focus();
+                return;
+            }
+
+            const newNum = parseInt(newNumStr);
+            if (isNaN(newNum) || newNum < 1) {
+                showToast('人数必须是大于0的整数', 'warning');
+                document.getElementById('editNeedNum').focus();
+                return;
+            }
+
+            const confirmed = await showConfirm(
+                '确认修改',
+                `名称: ${currentEditOldData.name} → ${newName}\n人数: ${currentEditOldData.num} → ${newNum}\n结束时间: ${currentEditOldData.endTime || '不限时'} → ${newEndTime || '不限时'}`
+            );
+            if (!confirmed) return;
+
+            const formData = new FormData();
+            formData.append('exam_name', newName);
+            formData.append('need_num', newNum);
+            if (newEndTime) formData.append('end_time_str', newEndTime);
+
+            try {
+                const res = await fetch(`/api/recruit/${currentEditId}`, {
+                    method: 'PUT',
+                    body: formData,
+                    headers: {
+                        'X-CSRF-Token': document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || ''
+                    }
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw err;
+                }
+                const data = await res.json();
+                showToast(data.msg, 'success');
+                editOffcanvas.hide();
+                if (data.code === 0) loadRecruitList();
+            } catch (err) {
+                showToast(err.detail || '修改失败', 'danger');
+            }
+        });
+
+        // ========== 列表加载 ==========
+
         async function loadRecruitList() {
             try {
                 const res = await fetch("/api/recruit/admin-list");
                 if (!res.ok) {
-                    alert("加载失败，请重新登录");
+                    showToast("加载失败，请重新登录", 'danger');
                     return;
                 }
                 const list = await res.json();
 
                 const tbody = document.querySelector("#recruitTable tbody");
-                tbody.innerHTML = "";  // 清空旧内容
+                tbody.innerHTML = "";
 
                 list.forEach(item => {
                     const tr = document.createElement("tr");
 
-                    // 考试名称
                     const tdExam = document.createElement("td");
                     tdExam.textContent = item.exam_name;
+                    tdExam.className = 'fw-bold';
                     tr.appendChild(tdExam);
 
-                    // 需招募人数
                     const tdNeed = document.createElement("td");
                     tdNeed.textContent = item.need_num;
                     tr.appendChild(tdNeed);
 
-                    // 已报名人数
                     const tdReg = document.createElement("td");
-                    tdReg.textContent = `${item.registered}/${item.need_num}`;
+                    const fillRatio = item.need_num > 0 ? (item.registered / item.need_num * 100) : 0;
+                    const barColor = fillRatio >= 100 ? 'bg-danger' : fillRatio >= 80 ? 'bg-warning' : 'bg-success';
+                    tdReg.innerHTML = `
+                        <div class="d-flex align-items-center gap-2">
+                            <span>${item.registered}/${item.need_num}</span>
+                            <div class="progress flex-grow-1" style="height:6px; max-width:80px;">
+                                <div class="progress-bar ${barColor}" style="width:${Math.min(fillRatio, 100)}%"></div>
+                            </div>
+                        </div>`;
                     tr.appendChild(tdReg);
 
-                    // 替换原结束时间渲染代码
                     const tdEnd = document.createElement("td");
-                    // 修复：判断值是否存在且非空字符串
-                    tdEnd.textContent = (item.end_time && item.end_time.trim() !== "") ? item.end_time : "不限时";
+                    const endText = (item.end_time && item.end_time.trim() !== "") ? item.end_time : "不限时";
+                    tdEnd.textContent = endText;
+                    if (endText === "不限时") tdEnd.className = 'text-muted';
                     tr.appendChild(tdEnd);
 
-                    // 状态
                     const tdStatus = document.createElement("td");
-                    tdStatus.textContent = item.status;
+                    const statusBadge = document.createElement("span");
+                    if (item.status.includes('进行')) {
+                        statusBadge.className = 'badge bg-success bg-opacity-10 text-success px-3 py-2';
+                    } else if (item.status.includes('截止') || item.status.includes('关闭')) {
+                        statusBadge.className = 'badge bg-secondary bg-opacity-10 text-secondary px-3 py-2';
+                    } else {
+                        statusBadge.className = 'badge bg-info bg-opacity-10 text-info px-3 py-2';
+                    }
+                    statusBadge.textContent = item.status;
+                    tdStatus.appendChild(statusBadge);
                     tr.appendChild(tdStatus);
 
                     // 操作列
                     const tdActions = document.createElement("td");
+                    tdActions.style.whiteSpace = 'nowrap';
 
-                    // 编辑链接
+                    // 编辑
                     const editLink = document.createElement("a");
                     editLink.href = "#";
+                    editLink.className = 'action-link';
                     editLink.textContent = "编辑";
                     editLink.onclick = function (e) {
                         e.preventDefault();
-                        editRecruit(item.id, item.exam_name, item.need_num, item.end_time);
+                        openEditPanel(item.id, item.exam_name, item.need_num, item.end_time);
                     };
                     tdActions.appendChild(editLink);
 
-                    // 开启/关闭链接
+                    // 开启/关闭
                     const toggleLink = document.createElement("a");
                     toggleLink.href = "#";
+                    toggleLink.className = 'action-link';
                     toggleLink.textContent = item.status.includes('关闭') ? "开启" : "关闭";
                     toggleLink.onclick = function (e) {
                         e.preventDefault();
@@ -149,17 +433,18 @@
                     };
                     tdActions.appendChild(toggleLink);
 
-                    // 导出链接
+                    // 导出
                     const exportLink = document.createElement("a");
                     exportLink.href = `/api/export/${item.id}`;
+                    exportLink.className = 'action-link';
                     exportLink.textContent = "导出Excel";
                     tdActions.appendChild(exportLink);
 
-                    // 删除链接
+                    // 删除
                     const delLink = document.createElement("a");
                     delLink.href = "#";
+                    delLink.className = 'action-link text-danger';
                     delLink.textContent = "删除";
-                    delLink.style.color = "#e53e3e";
                     delLink.onclick = function (e) {
                         e.preventDefault();
                         deleteRecruit(item.id, item.exam_name, item.registered);
@@ -171,58 +456,15 @@
                 });
             } catch (err) {
                 console.error("加载招募列表失败:", err);
-                alert("加载失败，请检查网络或重新登录");
+                showToast("加载失败，请检查网络或重新登录", 'danger');
             }
         }
 
-        // 编辑招募
-        function editRecruit(id, oldName, oldNum, oldEndTime) {
-            const newName = prompt("修改考试名称：", oldName);
-            if (newName === null) return;
+        // ========== 操作函数 ==========
 
-            const newNumStr = prompt("修改招募人数：", oldNum);
-            if (newNumStr === null) return;
-            const newNum = parseInt(newNumStr);
-            if (isNaN(newNum) || newNum < 1) {
-                alert("人数必须是大于0的整数");
-                return;
-            }
-
-            // 新增：结束时间（格式 YYYY-MM-DDTHH:MM）
-            let newEndTime = prompt("修改结束时间（格式：2026-06-30T18:00 或留空）", oldEndTime ? oldEndTime.replace(" ", "T") : "");
-            if (newEndTime === null) return;
-            newEndTime = newEndTime.trim() || null;
-
-            if (!confirm(`确定修改吗？\n\n名称: ${oldName} → ${newName}\n人数: ${oldNum} → ${newNum}\n结束时间: ${oldEndTime || "不限时"} → ${newEndTime || "不限时"}`)) return;
-
-            const formData = new FormData();
-            formData.append("exam_name", newName);
-            formData.append("need_num", newNum);
-            if (newEndTime) formData.append("end_time_str", newEndTime.replace("T", " "));
-
-            fetch(`/api/recruit/${id}`, {
-                method: "PUT",
-                body: formData,
-                headers: {
-                    "X-CSRF-Token": document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || ''
-                }
-            })
-                .then(res => {
-                    if (!res.ok) return res.json().then(err => { throw err; });
-                    return res.json();
-                })
-                .then(data => {
-                    alert(data.msg);
-                    if (data.code === 0) loadRecruitList();
-                })
-                .catch(err => {
-                    alert(err.detail || "修改失败");
-                });
-        }
-
-        // 切换开启/关闭状态
         async function toggleRecruit(id) {
-            if (!confirm("确定切换招募状态？")) return;
+            const confirmed = await showConfirm("确认操作", "确定切换招募状态？");
+            if (!confirmed) return;
             try {
                 const res = await fetch(`/api/recruit/${id}/toggle`, {
                     method: "POST",
@@ -231,17 +473,17 @@
                     }
                 });
                 const data = await res.json();
-                alert(data.msg);
+                showToast(data.msg, 'success');
                 if (data.code === 0) loadRecruitList();
             } catch (err) {
-                alert("操作失败，请重试");
+                showToast("操作失败，请重试", 'danger');
             }
         }
 
-        // 删除招募
         async function deleteRecruit(id, examName, registered) {
             const msg = `确定删除「${examName}」吗？\n${registered > 0 ? `已有 ${registered} 人报名，删除后报名记录也会一并清除！` : "暂无报名记录，可安全删除。"}`;
-            if (!confirm(msg)) return;
+            const confirmed = await showConfirm("确认删除", msg);
+            if (!confirmed) return;
             try {
                 const res = await fetch(`/api/recruit/${id}`, {
                     method: "DELETE",
@@ -250,14 +492,23 @@
                     }
                 });
                 const data = await res.json();
-                alert(data.msg);
+                showToast(data.msg, 'success');
                 if (data.code === 0) loadRecruitList();
             } catch (err) {
-                alert("删除失败，请重试");
+                showToast("删除失败，请重试", 'danger');
             }
         }
 
-        // 发布招募表单提交
+        async function logout() {
+            const confirmed = await showConfirm("退出登录", "确定要退出登录吗？");
+            if (!confirmed) return;
+            fetch("/api/admin/logout").then(() => {
+                window.location.href = "/admin/login";
+            });
+        }
+
+        // ========== 发布招募 ==========
+
         document.getElementById("addRecruitForm").addEventListener("submit", async (e) => {
             e.preventDefault();
             const submitBtn = e.target.querySelector('button');
@@ -266,14 +517,12 @@
 
             const formData = new FormData(e.target);
 
-            // 核心修复：手动处理 end_time 字段，映射到后端的 end_time_str
-            const endTimeInput = e.target.querySelector('input[name="end_time"]');
-            if (endTimeInput.value) {
-                // 将 datetime-local 的 "YYYY-MM-DDTHH:MM" 转为 "YYYY-MM-DD HH:MM"
-                const endTimeStr = endTimeInput.value.replace("T", " ");
-                formData.append("end_time_str", endTimeStr); // 传给后端的字段名
+            // 从 Flatpickr 获取格式化的结束时间（已是 "YYYY-MM-DD HH:MM" 格式）
+            const endTimeVal = document.getElementById('publishEndTime').value.trim();
+            if (endTimeVal) {
+                formData.append("end_time_str", endTimeVal);
             }
-            // 移除原表单里的 end_time（避免干扰，后端只认 end_time_str）
+            // 移除原 end_time 字段（已被 flatpickr 取代）
             formData.delete("end_time");
 
             try {
@@ -285,27 +534,19 @@
                     }
                 });
                 const data = await res.json();
-                alert(data.msg);
+                showToast(data.msg, data.code === 0 ? 'success' : 'danger');
                 if (data.code === 0) {
                     e.target.reset();
+                    publishPicker.clear(); // 同时清空日期选择器
                     loadRecruitList();
                 }
             } catch (err) {
-                alert("发布失败，请重试");
+                showToast("发布失败，请重试", 'danger');
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.textContent = "发布招募";
             }
         });
-
-        // 退出登录
-        function logout() {
-            if (confirm("确定要退出登录吗？")) {
-                fetch("/api/admin/logout").then(() => {
-                    window.location.href = "/admin/login";
-                });
-            }
-        }
 
         // 页面加载时获取列表
         loadRecruitList();
