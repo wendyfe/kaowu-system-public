@@ -150,7 +150,7 @@
 
         function showQQGroupModal(qqGroup) {
             if (!qqGroupModalInstance) {
-                qqGroupModalInstance = new bootstrap.Modal(document.getElementById('qqGroupModal'));
+                qqGroupModalInstance = new bootstrap.Modal(document.getElementById('qqGroupModal'), { backdrop: 'static', keyboard: false });
             }
             // 从下拉列表找到当前选中的考试名称
             const examSelect = document.getElementById('examSelect');
