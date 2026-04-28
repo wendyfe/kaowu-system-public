@@ -82,6 +82,7 @@ class Recruitment(Base):
     need_num = Column(Integer, nullable=False)
     create_time = Column(DateTime, default=now_beijing)
     is_active = Column(Boolean, default=True)
+    qq_group = Column(String(20), nullable=True)  # 考务QQ群号，纯数字，可空
     end_time = Column(DateTime, nullable=True)   # 北京时间
 
 class Registration(Base):
