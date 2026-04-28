@@ -332,6 +332,21 @@ async def toggle_recruit(request: Request, recruit_id: int, db: Session = Depend
     status = "开启" if recruit.is_active else "关闭"
     return {"code": 0, "msg": f"招募已{status}"}
 
+# 删除招募（同时删除关联报名记录）
+@app.delete("/api/recruit/{recruit_id}")
+async def delete_recruit(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    check_admin_login(request)
+    check_csrf(request)
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+    # 先删关联的报名记录
+    db.query(Registration).filter(Registration.recruitment_id == recruit_id).delete()
+    # 再删招募
+    db.query(Recruitment).filter(Recruitment.id == recruit_id).delete()
+    db.commit()
+    return {"code": 0, "msg": "删除成功"}
+
 # 学生端招募列表
 @app.get("/api/recruit/list")
 async def get_recruit_list(db: Session = Depends(get_db)):

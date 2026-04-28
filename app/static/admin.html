@@ -155,6 +155,17 @@
                     exportLink.textContent = "导出Excel";
                     tdActions.appendChild(exportLink);
 
+                    // 删除链接
+                    const delLink = document.createElement("a");
+                    delLink.href = "#";
+                    delLink.textContent = "删除";
+                    delLink.style.color = "#e53e3e";
+                    delLink.onclick = function (e) {
+                        e.preventDefault();
+                        deleteRecruit(item.id, item.exam_name, item.registered);
+                    };
+                    tdActions.appendChild(delLink);
+
                     tr.appendChild(tdActions);
                     tbody.appendChild(tr);
                 });
@@ -224,6 +235,25 @@
                 if (data.code === 0) loadRecruitList();
             } catch (err) {
                 alert("操作失败，请重试");
+            }
+        }
+
+        // 删除招募
+        async function deleteRecruit(id, examName, registered) {
+            const msg = `确定删除「${examName}」吗？\n${registered > 0 ? `已有 ${registered} 人报名，删除后报名记录也会一并清除！` : "暂无报名记录，可安全删除。"}`;
+            if (!confirm(msg)) return;
+            try {
+                const res = await fetch(`/api/recruit/${id}`, {
+                    method: "DELETE",
+                    headers: {
+                        "X-CSRF-Token": document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || ''
+                    }
+                });
+                const data = await res.json();
+                alert(data.msg);
+                if (data.code === 0) loadRecruitList();
+            } catch (err) {
+                alert("删除失败，请重试");
             }
         }
 
