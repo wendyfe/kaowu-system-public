@@ -109,6 +109,25 @@
         </div>
     </div>
 
+    <!-- QQ群入群提醒弹窗 -->
+    <div class="modal fade" id="qqGroupModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="border-radius:16px;">
+                <div class="modal-body text-center py-5 px-4">
+                    <div style="font-size:48px;margin-bottom:12px;">✅</div>
+                    <h4 class="mb-2">报名成功！</h4>
+                    <p class="text-muted mb-4" id="qqGroupExamName" style="font-size:15px;"></p>
+                    <div style="background:#e8f5e9;border-radius:12px;padding:16px;margin-bottom:16px;">
+                        <div style="font-size:14px;color:#2e7d32;margin-bottom:6px;">📢 请加入考务工作QQ群</div>
+                        <div id="qqGroupNumber" style="font-size:28px;font-weight:bold;color:#1565c0;letter-spacing:2px;"></div>
+                        <div style="font-size:13px;color:#666;margin-top:6px;">后续通知将通过群消息发布</div>
+                    </div>
+                    <button type="button" class="btn btn-primary btn-lg px-5" data-bs-dismiss="modal">知道了</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <footer class="bg-dark text-white text-center py-3 fixed-bottom">
         <div class="container">
             <p class="mb-0">© 2026 考务报名管理系统 - 所有权利保留</p>
@@ -124,6 +143,23 @@
             toastBody.textContent = message;
             toastEl.className = 'toast align-items-center border-0 text-bg-' + (type || 'info');
             bootstrap.Toast.getOrCreateInstance(toastEl).show();
+        }
+
+        // QQ群入群提醒
+        let qqGroupModalInstance = null;
+
+        function showQQGroupModal(qqGroup) {
+            if (!qqGroupModalInstance) {
+                qqGroupModalInstance = new bootstrap.Modal(document.getElementById('qqGroupModal'));
+            }
+            // 从下拉列表找到当前选中的考试名称
+            const examSelect = document.getElementById('examSelect');
+            const selectedOpt = examSelect.options[examSelect.selectedIndex];
+            const examName = selectedOpt ? selectedOpt.textContent.split('（')[0] : '';
+
+            document.getElementById('qqGroupExamName').textContent = `「${examName}」`;
+            document.getElementById('qqGroupNumber').textContent = qqGroup;
+            qqGroupModalInstance.show();
         }
 
         // 修复：全局变量保存用户已选中的考试ID和表单输入值
@@ -234,6 +270,12 @@
                 if (res.ok) {
                     data = await res.json();
                     showToast(data.msg || "报名成功", 'success');
+
+                    // 如有QQ群号，弹窗提醒加群
+                    if (data.qq_group) {
+                        showQQGroupModal(data.qq_group);
+                    }
+
                     // 报名成功后清空保存的状态
                     selectedExamId = '';
                     formInputValues = {
@@ -331,6 +373,24 @@
                             row3.appendChild(r3c1);
                             row3.appendChild(r3c2);
                             li.appendChild(row3);
+
+                            // 考务QQ群号
+                            if (item.qq_group) {
+                                const rowGroup = document.createElement("div");
+                                rowGroup.className = "row mb-2";
+                                const rgc1 = document.createElement("div");
+                                rgc1.className = "col-3 text-muted small";
+                                rgc1.textContent = "考务群";
+                                const rgc2 = document.createElement("div");
+                                rgc2.className = "col-9";
+                                const span = document.createElement("span");
+                                span.style.color = "#e67e22";
+                                span.textContent = `📢 请加群：${item.qq_group}`;
+                                rgc2.appendChild(span);
+                                rowGroup.appendChild(rgc1);
+                                rowGroup.appendChild(rgc2);
+                                li.appendChild(rowGroup);
+                            }
 
                             if (item.can_cancel) {
                                 const btn = document.createElement("button");
