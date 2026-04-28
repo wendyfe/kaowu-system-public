@@ -259,6 +259,7 @@ async def add_recruit(
     exam_name: str = Form(...),
     need_num: int = Form(...),
     end_time_str: str = Form(None),
+    qq_group: str = Form(None),
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
@@ -281,7 +282,7 @@ async def add_recruit(
                     detail=f"结束时间格式错误（收到: {end_time_str}），应为 YYYY-MM-DD HH:MM 或 YYYY-MM-DDTHH:MM"
                 )
 
-    recruit = Recruitment(exam_name=exam_name.strip(), need_num=need_num, end_time=end_time)
+    recruit = Recruitment(exam_name=exam_name.strip(), need_num=need_num, end_time=end_time, qq_group=qq_group.strip() if qq_group and qq_group.strip() else None)
     db.add(recruit)
     db.commit()
     db.refresh(recruit)
@@ -473,7 +474,7 @@ async def student_register(
     if is_full:
         raise HTTPException(400, "报名人数已满")
 
-    return {"code": 0, "msg": "报名成功"}
+    return {"code": 0, "msg": "报名成功", "qq_group": recruit.qq_group}
 
 # 查询我的报名记录（新增可取消标识+报名ID+QQ号）
 @app.post("/api/my-registrations")
@@ -518,7 +519,8 @@ async def my_registrations(
                 "create_time": reg.create_time.strftime("%Y-%m-%d %H:%M"),
                 "status": "已报名",
                 "can_cancel": can_cancel,  # 新增可取消标识
-                "qq": reg.qq  # 新增QQ号
+                "qq": reg.qq,  # 新增QQ号
+                "qq_group": recruit.qq_group  # 考务QQ群号
             })
     return {"code": 0, "data": result}
 
