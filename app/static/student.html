@@ -383,7 +383,10 @@
                                 rgc1.textContent = "考务群";
                                 const rgc2 = document.createElement("div");
                                 rgc2.className = "col-9";
-                                rgc2.innerHTML = `<span style="color:#e67e22;">📢 请加群：${item.qq_group}</span>`;
+                                const span = document.createElement("span");
+                                span.style.color = "#e67e22";
+                                span.textContent = `📢 请加群：${item.qq_group}`;
+                                rgc2.appendChild(span);
                                 rowGroup.appendChild(rgc1);
                                 rowGroup.appendChild(rgc2);
                                 li.appendChild(rowGroup);
