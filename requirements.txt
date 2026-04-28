@@ -1,9 +1,8 @@
-fastapi
-uvicorn
-sqlalchemy
-python-multipart
-aiofiles
-itsdangerous
-pandas
-openpyxl
-jinja2>=3.1.2
+fastapi==0.115.12
+uvicorn==0.34.2
+sqlalchemy==2.0.41
+python-multipart==0.0.20
+itsdangerous==2.2.0
+pandas==2.3.0
+openpyxl==3.1.5
+jinja2==3.1.6

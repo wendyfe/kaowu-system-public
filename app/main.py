@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form, HTTPException, Depends
+from fastapi import FastAPI, Request, Form, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
@@ -21,6 +21,7 @@ from email.header import Header
 from email.utils import formataddr
 import random
 import string
+import time
 
 
 # ==================== 北京时间配置 ====================
@@ -32,7 +33,9 @@ def now_beijing():
 # ==================== 核心配置 ====================
 ADMIN_USERNAME = os.getenv("KAOWU_ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("KAOWU_ADMIN_PASSWORD", "change_this_immediately")
-SECRET_KEY = "kaowu_2026_secret"
+SECRET_KEY = os.getenv("KAOWU_SECRET_KEY", "kaowu_2026_secret")
+if SECRET_KEY == "kaowu_2026_secret":
+    print("WARNING: Using default SECRET_KEY. Set KAOWU_SECRET_KEY env var for production.")
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 
 # 新增邮箱配置
@@ -40,9 +43,6 @@ SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 465))
-
-# 验证码存储（内存级，重启失效；生产环境建议用Redis）
-VERIFY_CODES = {}
 
 # ==================== FastAPI 初始化 ====================
 app = FastAPI(title="考务报名系统")
@@ -67,8 +67,8 @@ async def add_csrf_token(request: Request, call_next):
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ==================== 数据库 ====================
-DB_DIR = "/app/db"
-DB_PATH = f"{DB_DIR}/kaowu.db"
+DB_DIR = os.getenv("DB_DIR", os.path.join(os.path.dirname(__file__), "db"))
+DB_PATH = os.path.join(DB_DIR, "kaowu.db")
 os.makedirs(DB_DIR, exist_ok=True)
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -126,6 +126,40 @@ def db_lock(db: Session):
         raise
 
 # ==================== 工具函数 ====================
+
+# 获取真实客户端 IP（支持反代和 Docker 环境）
+def get_client_ip(request: Request) -> str:
+    # 优先取 X-Forwarded-For 中的第一个 IP（原始客户端 IP）
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    # 其次取 X-Real-IP（Nginx 常用）
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip
+    # 兜底取直连 IP
+    return request.client.host or "unknown"
+
+# 简易内存级限流器
+_RATE_LIMITS: dict[str, list[float]] = {}
+
+def rate_limit(key: str, max_requests: int = 10, window: int = 60):
+    now = time.time()
+    if key not in _RATE_LIMITS:
+        _RATE_LIMITS[key] = []
+    _RATE_LIMITS[key] = [t for t in _RATE_LIMITS[key] if now - t < window]
+    if len(_RATE_LIMITS[key]) >= max_requests:
+        raise HTTPException(429, f"请求过于频繁，请{window}秒后再试")
+    _RATE_LIMITS[key].append(now)
+
+# 定期清理过期限流记录
+def _cleanup_rate_limits():
+    now = time.time()
+    for key in list(_RATE_LIMITS.keys()):
+        _RATE_LIMITS[key] = [t for t in _RATE_LIMITS[key] if now - t < 120]
+        if not _RATE_LIMITS[key]:
+            del _RATE_LIMITS[key]
+
 # 生成6位数字验证码
 def generate_verify_code():
     return ''.join(random.choices(string.digits, k=6))
@@ -154,9 +188,8 @@ def send_verify_email(to_email: str, code: str):
         server.quit()
         return True
     except Exception as e:
-        print(f"发送邮件失败: {e}")
-        # 建议临时加这一行，方便你看错误原因
         import traceback
+        print(f"发送邮件失败: {e}")
         print(traceback.format_exc())
         raise HTTPException(500, f"发送邮件失败：{str(e)}")
 
@@ -169,9 +202,14 @@ def check_admin_login(request: Request):
         data = serializer.loads(session, max_age=3600)
         if data != ADMIN_USERNAME:
             raise HTTPException(status_code=307, detail="登录失效", headers={"Location": "/admin/login"})
-        return True
     except:
         raise HTTPException(status_code=307, detail="登录失效", headers={"Location": "/admin/login"})
+
+def check_csrf(request: Request):
+    csrf_token = request.cookies.get("kaowu_csrf")
+    client_token = request.headers.get("X-CSRF-Token")
+    if not csrf_token or csrf_token != client_token:
+        raise HTTPException(status_code=403, detail="CSRF token 校验失败")
 
 # ==================== 页面路由 ====================
 @app.get("/", response_class=HTMLResponse)
@@ -198,7 +236,8 @@ async def admin_page(request: Request):
 # ==================== 接口路由 ====================
 # 管理员登录/登出（不变）
 @app.post("/api/admin/login")
-async def admin_login(form: OAuth2PasswordRequestForm = Depends()):
+async def admin_login(request: Request, form: OAuth2PasswordRequestForm = Depends()):
+    rate_limit(f"login_{get_client_ip(request)}", max_requests=5, window=60)
     if form.username == ADMIN_USERNAME and form.password == ADMIN_PASSWORD:
         session = serializer.dumps(form.username)
         response = RedirectResponse(url="/admin", status_code=302)
@@ -222,10 +261,8 @@ async def add_recruit(
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
-    csrf_token = request.cookies.get("kaowu_csrf")
-    client_token = request.headers.get("X-CSRF-Token")
-    if not csrf_token or csrf_token != client_token:
-        raise HTTPException(status_code=403, detail="CSRF token 校验失败")
+    check_csrf(request)
+    rate_limit(f"recruit_add_{get_client_ip(request)}", max_requests=10, window=60)
     if need_num < 1:
         raise HTTPException(400, "人数必须≥1")
 
@@ -260,10 +297,7 @@ async def edit_recruit(
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
-    csrf_token = request.cookies.get("kaowu_csrf")
-    client_token = request.headers.get("X-CSRF-Token")
-    if not csrf_token or csrf_token != client_token:
-        raise HTTPException(status_code=403, detail="CSRF token 校验失败")
+    check_csrf(request)
     recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
     if not recruit:
         raise HTTPException(404, "招募不存在")
@@ -289,10 +323,7 @@ async def edit_recruit(
 @app.post("/api/recruit/{recruit_id}/toggle")
 async def toggle_recruit(request: Request, recruit_id: int, db: Session = Depends(get_db)):
     check_admin_login(request)
-    csrf_token = request.cookies.get("kaowu_csrf")
-    client_token = request.headers.get("X-CSRF-Token")
-    if not csrf_token or csrf_token != client_token:
-        raise HTTPException(status_code=403, detail="CSRF token 校验失败")
+    check_csrf(request)
     recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
     if not recruit:
         raise HTTPException(404, "招募不存在")
@@ -301,13 +332,22 @@ async def toggle_recruit(request: Request, recruit_id: int, db: Session = Depend
     status = "开启" if recruit.is_active else "关闭"
     return {"code": 0, "msg": f"招募已{status}"}
 
-# 学生端招募列表（不变）
+# 学生端招募列表
 @app.get("/api/recruit/list")
 async def get_recruit_list(db: Session = Depends(get_db)):
     recruits = db.query(Recruitment).filter(Recruitment.is_active == True).all()
+    if not recruits:
+        return []
+    recruit_ids = [r.id for r in recruits]
+    counts = dict(
+        db.query(Registration.recruitment_id, func.count(Registration.id))
+        .filter(Registration.recruitment_id.in_(recruit_ids))
+        .group_by(Registration.recruitment_id)
+        .all()
+    )
     result = []
     for r in recruits:
-        registered = db.query(func.count(Registration.id)).filter(Registration.recruitment_id == r.id).scalar()
+        registered = counts.get(r.id, 0)
         remaining = max(r.need_num - registered, 0)
         result.append({
             "id": r.id,
@@ -318,20 +358,30 @@ async def get_recruit_list(db: Session = Depends(get_db)):
         })
     return result
 
-# 管理员招募列表（不变）
+# 管理员招募列表
 @app.get("/api/recruit/admin-list")
 async def get_admin_recruit_list(request: Request, db: Session = Depends(get_db)):
     check_admin_login(request)
     recruits = db.query(Recruitment).all()
+    if not recruits:
+        return []
+    recruit_ids = [r.id for r in recruits]
+    counts = dict(
+        db.query(Registration.recruitment_id, func.count(Registration.id))
+        .filter(Registration.recruitment_id.in_(recruit_ids))
+        .group_by(Registration.recruitment_id)
+        .all()
+    )
+    now = now_beijing()
     result = []
     for r in recruits:
-        count = db.query(func.count(Registration.id)).filter(Registration.recruitment_id == r.id).scalar()
-        status = "已关闭" if not r.is_active else ("已截止" if r.end_time and now_beijing() > r.end_time else "进行中")
+        count_val = counts.get(r.id, 0)
+        status = "已关闭" if not r.is_active else ("已截止" if r.end_time and now > r.end_time else "进行中")
         result.append({
             "id": r.id,
             "exam_name": r.exam_name,
             "need_num": r.need_num,
-            "registered": count,
+            "registered": count_val,
             "end_time": r.end_time.strftime("%Y-%m-%d %H:%M") if r.end_time else None,
             "status": status
         })
@@ -349,6 +399,7 @@ async def student_register(
     has_experience: bool = Form(...),   # 新增：前端会传 "true"/"false" 或 "1"/"0"，FastAPI 会转 bool
     db: Session = Depends(get_db)
 ):
+    rate_limit(f"reg_{get_client_ip(request)}", max_requests=10, window=60)
     # 校验学号
     if not (student_id.isdigit() and len(student_id) == 8):
         raise HTTPException(400, "学号必须是8位纯数字")
@@ -359,7 +410,7 @@ async def student_register(
     if not qq.isdigit():
         raise HTTPException(400, "QQ号必须是纯数字")
 
-    ip = request.client.host or "unknown"
+    ip = get_client_ip(request)
     
     # 加行锁查询招募记录
     recruit = db.query(Recruitment).filter(Recruitment.id == recruitment_id).with_for_update().first()
@@ -376,32 +427,35 @@ async def student_register(
         db.commit()
         raise HTTPException(400, "报名已截止（时间到期，北京时间）")
 
+    is_full = False
     with db_lock(db):
         # 锁内重新查询人数
         current_count = db.query(func.count(Registration.id)).filter(Registration.recruitment_id == recruitment_id).scalar()
         if current_count >= recruit.need_num:
             recruit.is_active = False
-            db.commit()
-            raise HTTPException(400, "报名人数已满")
+            is_full = True
+        else:
+            # 防重复报名（同一考试 + 同一学号）
+            exists = db.query(Registration).filter(
+                Registration.recruitment_id == recruitment_id,
+                Registration.student_id == student_id
+            ).first()
+            if exists:
+                raise HTTPException(400, "此学号已报名过该考试")
 
-        # 防重复报名（同一考试 + 同一学号）
-        exists = db.query(Registration).filter(
-            Registration.recruitment_id == recruitment_id,
-            Registration.student_id == student_id
-        ).first()
-        if exists:
-            raise HTTPException(400, "此学号已报名过该考试")
+            reg = Registration(
+                recruitment_id=recruitment_id,
+                student_id=student_id,
+                name=name,
+                phone=phone,
+                qq=qq,
+                has_experience=has_experience,
+                ip_address=ip
+            )
+            db.add(reg)
 
-        reg = Registration(
-            recruitment_id=recruitment_id,
-            student_id=student_id,
-            name=name,
-            phone=phone,
-            qq=qq,  # 新增QQ字段
-            has_experience=has_experience,   # ← 新增
-            ip_address=ip
-        )
-        db.add(reg)
+    if is_full:
+        raise HTTPException(400, "报名人数已满")
 
     return {"code": 0, "msg": "报名成功"}
 
@@ -422,10 +476,18 @@ async def my_registrations(
         Registration.phone == phone
     ).all()
 
+    recruit_ids = list({reg.recruitment_id for reg in regs})
+    recruit_map = {}
+    if recruit_ids:
+        recruit_map = {
+            r.id: r
+            for r in db.query(Recruitment).filter(Recruitment.id.in_(recruit_ids)).all()
+        }
+
     result = []
     now = now_beijing()
     for reg in regs:
-        recruit = db.query(Recruitment).filter(Recruitment.id == reg.recruitment_id).first()
+        recruit = recruit_map.get(reg.recruitment_id)
         if recruit:
             # 判断是否可取消：招募未截止 + 未手动关闭
             can_cancel = False
@@ -444,41 +506,30 @@ async def my_registrations(
             })
     return {"code": 0, "data": result}
 
-# 新增：发送验证码接口
-
+# 发送验证码接口
 @app.post("/api/send-verify-code")
 async def send_verify_code(
+    background_tasks: BackgroundTasks,
     reg_id: int = Form(...),
     recruit_id: int = Form(...),
     email: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    # 校验报名记录
+    rate_limit(f"send_code_{reg_id}", max_requests=3, window=300)
     reg = db.query(Registration).filter(Registration.id == reg_id).first()
     if not reg:
         raise HTTPException(404, "报名记录不存在")
-    
-    # 校验招募状态
+
     recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
     if not recruit:
         raise HTTPException(404, "招募记录不存在")
     if not recruit.is_active or (recruit.end_time and now_beijing() > recruit.end_time):
         raise HTTPException(400, "该招募已截止，无法取消报名")
-    
-    # 校验邮箱格式（QQ邮箱）
+
     if not email.endswith("@qq.com") or not email.split("@")[0].isdigit():
         raise HTTPException(400, "请输入正确的QQ邮箱")
-    
-    # 生成验证码
+
     code = generate_verify_code()
-    # 存储验证码（内存+数据库双存储，可选）
-    VERIFY_CODES[reg_id] = {
-        "code": code,
-        "email": email,
-        "create_time": now_beijing(),
-        "is_used": False
-    }
-    # 数据库存储（可选，防止重启丢失）
     db_code = VerifyCode(
         reg_id=reg_id,
         code=code,
@@ -486,64 +537,45 @@ async def send_verify_code(
     )
     db.add(db_code)
     db.commit()
-    
-    # 发送邮件
-    send_verify_email(email, code)
+
+    background_tasks.add_task(send_verify_email, email, code)
     return {"code": 0, "msg": "验证码发送成功"}
 
-# 新增：取消报名接口
+# 取消报名接口
 @app.post("/api/cancel-reg")
 async def cancel_reg(
     request: Request,
-    reg_id: int = Form(...),          # 必须加 = Form(...)
-    verify_code: str = Form(...),     # 必须加 = Form(...)
+    reg_id: int = Form(...),
+    verify_code: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    # 1. 校验验证码
-    code_info = VERIFY_CODES.get(reg_id)
-    if not code_info:
-        # 从数据库查
-        db_code = db.query(VerifyCode).filter(
-            VerifyCode.reg_id == reg_id,
-            VerifyCode.is_used == False,
-            VerifyCode.create_time >= now_beijing() - timedelta(minutes=5)
-        ).order_by(VerifyCode.create_time.desc()).first()
-        if not db_code or db_code.code != verify_code:
-            raise HTTPException(400, "验证码错误或已过期")
-        # 标记为已使用
-        db_code.is_used = True
-    else:
-        # 内存校验
-        if code_info["is_used"] or code_info["code"] != verify_code:
-            raise HTTPException(400, "验证码错误或已使用")
-        if now_beijing() - code_info["create_time"] > timedelta(minutes=5):
-            raise HTTPException(400, "验证码已过期")
-        # 标记为已使用
-        code_info["is_used"] = True
-    
-    # 2. 校验报名记录
+    rate_limit(f"cancel_reg_{get_client_ip(request)}", max_requests=5, window=300)
+    db_code = db.query(VerifyCode).filter(
+        VerifyCode.reg_id == reg_id,
+        VerifyCode.is_used == False,
+        VerifyCode.create_time >= now_beijing() - timedelta(minutes=5)
+    ).order_by(VerifyCode.create_time.desc()).first()
+    if not db_code or db_code.code != verify_code:
+        raise HTTPException(400, "验证码错误或已过期")
+    db_code.is_used = True
+
     reg = db.query(Registration).filter(Registration.id == reg_id).with_for_update().first()
     if not reg:
         raise HTTPException(404, "报名记录不存在")
-    
-    # 3. 校验招募状态
+
     recruit = db.query(Recruitment).filter(Recruitment.id == reg.recruitment_id).with_for_update().first()
     if not recruit:
         raise HTTPException(404, "招募记录不存在")
     if not recruit.is_active or (recruit.end_time and now_beijing() > recruit.end_time):
         raise HTTPException(400, "该招募已截止，无法取消报名")
-    
-    # 4. 执行取消操作
+
     with db_lock(db):
-        # 删除报名记录
         db.delete(reg)
-        # 恢复招募状态（如果之前因人数满被关闭）
         if not recruit.is_active:
             current_count = db.query(func.count(Registration.id)).filter(Registration.recruitment_id == recruit.id).scalar()
             if current_count < recruit.need_num:
                 recruit.is_active = True
-        db.commit()
-    
+
     return {"code": 0, "msg": "取消报名成功"}
 
 # 导出 Excel（不变，新增QQ字段导出）

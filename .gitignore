@@ -1,6 +1,26 @@
-# macOS 系统文件
+# macOS
 .DS_Store
-**/.DS_Store   # 忽略所有子目录里的 .DS_Store（更彻底）
+**/.DS_Store
 .AppleDouble
 .LSOverride
 ._*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+*.env
+
+# Database
+*.db
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/

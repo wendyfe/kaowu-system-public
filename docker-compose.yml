@@ -8,12 +8,12 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./app/db:/app/db  # 数据库持久化
-    environment:
-      - TZ=Asia/Shanghai
-      - KAOWU_ADMIN_USERNAME=admin
-      - KAOWU_ADMIN_PASSWORD=1234             # 建议改成复杂。密码
-      - SMTP_USER=你的QQ或gmail
-      - SMTP_PASS=16位专用密码
-      - SMTP_HOST=smtp.qq.com
-      - SMTP_PORT=465                         # ← 保持 465
+      - ./app/db:/app/db
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
