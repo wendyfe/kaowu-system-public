@@ -374,6 +374,21 @@
                             row3.appendChild(r3c2);
                             li.appendChild(row3);
 
+                            // 考务QQ群号
+                            if (item.qq_group) {
+                                const rowGroup = document.createElement("div");
+                                rowGroup.className = "row mb-2";
+                                const rgc1 = document.createElement("div");
+                                rgc1.className = "col-3 text-muted small";
+                                rgc1.textContent = "考务群";
+                                const rgc2 = document.createElement("div");
+                                rgc2.className = "col-9";
+                                rgc2.innerHTML = `<span style="color:#e67e22;">📢 请加群：${item.qq_group}</span>`;
+                                rowGroup.appendChild(rgc1);
+                                rowGroup.appendChild(rgc2);
+                                li.appendChild(rowGroup);
+                            }
+
                             if (item.can_cancel) {
                                 const btn = document.createElement("button");
                                 btn.className = "btn btn-danger btn-sm";
