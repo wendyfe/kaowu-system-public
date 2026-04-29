@@ -70,34 +70,7 @@
                 <button type="submit" class="btn-custom w-100">提交报名</button>
             </form>
         </div>
-
-        <!-- 考场布置视频 -->
-        <div class="card p-5 mb-4">
-            <h3 class="mb-4">📹 考场布置要求视频</h3>
-            <p class="text-muted mb-3" style="font-size:14px;">请认真观看，了解考场布置规范和注意事项</p>
-            <video id="pageVideoPlayer" controls
-                   style="width:100%;max-width:720px;border-radius:8px;background:#000;"
-                   src="">
-            </video>
-            <div id="videoWatchForm" class="row g-2 align-items-end">
-                <div class="col-md-3">
-                    <label class="form-label">学号</label>
-                    <input type="text" id="videoStudentId" class="form-control" placeholder="8位数字">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">姓名</label>
-                    <input type="text" id="videoName" class="form-control" placeholder="姓名">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">手机号</label>
-                    <input type="text" id="videoPhone" class="form-control" placeholder="11位数字">
-                </div>
-                <div class="col-md-3">
-                    <button type="button" id="pageConfirmWatchedBtn" class="btn btn-success w-100">✅ 确认已完成观看</button>
-                </div>
-            </div>
-            <div id="videoWatchResult" class="mt-2" style="display:none;"></div>
-        </div>
+<!-- end regForm card -->
 
         <div class="card p-5">
             <h3 class="mb-4">查询我的报名记录</h3>
@@ -146,23 +119,13 @@
                     <h4 class="mb-2">报名成功！</h4>
                     <p class="text-muted mb-3" id="qqGroupExamName" style="font-size:15px;"></p>
 
-                    <!-- 视频区域 -->
-                    <div id="modalVideoSection" class="mb-3" style="display:none;">
-                        <p class="text-muted mb-2" style="font-size:14px;">📹 请观看考场布置要求视频</p>
-                        <video id="modalVideoPlayer" controls
-                               style="width:100%;max-width:480px;border-radius:8px;background:#000;"
-                               src="">
-                        </video>
-                        <div class="mt-2 d-flex justify-content-center align-items-center gap-2">
-                            <button type="button" id="modalConfirmWatchedBtn" class="btn btn-outline-success btn-sm">✅ 我已完成观看</button>
-                            <span id="modalWatchedBadge" class="badge bg-success" style="display:none;">已记录</span>
+                    <div style="background:#e8f5e9;border-radius:12px;padding:20px;margin-bottom:16px;">
+                        <div style="font-size:14px;color:#2e7d32;margin-bottom:12px;">📢 请加入考务工作QQ群</div>
+                        <a id="qqGroupJumpLink" href="#" target="_blank" class="btn btn-success btn-lg mb-2">一键加入QQ群</a>
+                        <div style="font-size:14px;color:#555;">
+                            群号：<span id="qqGroupNumber" style="font-weight:bold;color:#1565c0;"></span>
+                            <span style="font-size:12px;color:#999;">（如无法跳转请手动复制）</span>
                         </div>
-                    </div>
-
-                    <div style="background:#e8f5e9;border-radius:12px;padding:16px;margin-bottom:16px;">
-                        <div style="font-size:14px;color:#2e7d32;margin-bottom:6px;">📢 请加入考务工作QQ群</div>
-                        <div id="qqGroupNumber" style="font-size:28px;font-weight:bold;color:#1565c0;letter-spacing:2px;"></div>
-                        <div style="font-size:13px;color:#666;margin-top:6px;">后续通知将通过群消息发布</div>
                     </div>
                     <button type="button" id="qqGroupDismissBtn" class="btn btn-primary btn-lg px-5">知道了</button>
                 </div>
@@ -187,10 +150,10 @@
             bootstrap.Toast.getOrCreateInstance(toastEl).show();
         }
 
-        // ========== 视频 + QQ群弹窗 ==========
+        // ========== QQ群跳转弹窗 ==========
         let qqGroupModalInstance = null;
 
-        function showQQGroupModal(qqGroup, videoUrl) {
+        function showQQGroupModal(qqGroup) {
             if (!qqGroupModalInstance) {
                 qqGroupModalInstance = new bootstrap.Modal(document.getElementById('qqGroupModal'), { backdrop: 'static', keyboard: false });
             }
@@ -200,19 +163,7 @@
             const examName = selectedOpt ? selectedOpt.textContent.split('（')[0] : '';
             document.getElementById('qqGroupExamName').textContent = `「${examName}」`;
             document.getElementById('qqGroupNumber').textContent = qqGroup;
-
-            const videoSection = document.getElementById('modalVideoSection');
-            const confirmBtn = document.getElementById('modalConfirmWatchedBtn');
-            const badge = document.getElementById('modalWatchedBadge');
-
-            if (videoUrl) {
-                videoSection.style.display = 'block';
-                document.getElementById('modalVideoPlayer').src = videoUrl;
-                confirmBtn.style.display = 'inline-block';
-                badge.style.display = 'none';
-            } else {
-                videoSection.style.display = 'none';
-            }
+            document.getElementById('qqGroupJumpLink').href = 'tencent://groupwpa?subcmd=RequestJoinGroup&group=' + qqGroup;
 
             qqGroupModalInstance.show();
         }
@@ -222,92 +173,7 @@
             if (qqGroupModalInstance) qqGroupModalInstance.hide();
         });
 
-        // 弹窗内确认观看
-        document.getElementById('modalConfirmWatchedBtn').addEventListener('click', function() {
-            const studentId = formInputValues.student_id;
-            const name = formInputValues.name;
-            const phone = formInputValues.phone;
-            if (!studentId || !name || !phone) {
-                showToast('报名信息缺失，请重新报名', 'warning');
-                return;
-            }
-            const formData = new FormData();
-            formData.append('student_id', studentId);
-            formData.append('name', name);
-            formData.append('phone', phone);
-            const btn = document.getElementById('modalConfirmWatchedBtn');
-            btn.disabled = true;
-            btn.textContent = '提交中...';
-            fetch('/api/mark-video-watched', { method: 'POST', body: formData })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.code === 0) {
-                        btn.style.display = 'none';
-                        document.getElementById('modalWatchedBadge').style.display = 'inline';
-                        showToast('观看记录已保存', 'success');
-                    } else {
-                        showToast(data.detail || '确认失败', 'danger');
-                        btn.disabled = false;
-                        btn.textContent = '✅ 我已完成观看';
-                    }
-                });
-        });
-
-        // 弹窗关闭时清理
-        document.getElementById('qqGroupModal').addEventListener('hidden.bs.modal', function() {
-            document.getElementById('modalVideoPlayer').src = '';
-            document.getElementById('modalConfirmWatchedBtn').style.display = 'inline-block';
-            document.getElementById('modalConfirmWatchedBtn').disabled = false;
-            document.getElementById('modalConfirmWatchedBtn').textContent = '✅ 我已完成观看';
-            document.getElementById('modalWatchedBadge').style.display = 'none';
-        });
-
-        // ========== 独立视频区确认观看 ==========
-        document.getElementById('pageConfirmWatchedBtn').addEventListener('click', function() {
-            const studentId = document.getElementById('videoStudentId').value.trim();
-            const name = document.getElementById('videoName').value.trim();
-            const phone = document.getElementById('videoPhone').value.trim();
-            if (!studentId || !name || !phone) {
-                showToast('请填写学号、姓名和手机号', 'warning');
-                return;
-            }
-            const formData = new FormData();
-            formData.append('student_id', studentId);
-            formData.append('name', name);
-            formData.append('phone', phone);
-            const btn = document.getElementById('pageConfirmWatchedBtn');
-            btn.disabled = true;
-            btn.textContent = '提交中...';
-            fetch('/api/mark-video-watched', { method: 'POST', body: formData })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.code === 0) {
-                        const result = document.getElementById('videoWatchResult');
-                        result.style.display = 'block';
-                        result.innerHTML = `<div class="alert alert-success py-2 mb-0">✅ 观看记录已保存（${data.watched_at || '已记录'}）</div>`;
-                        btn.disabled = false;
-                        btn.textContent = '✅ 确认已完成观看';
-                        showToast('观看记录已保存', 'success');
-                    } else {
-                        showToast(data.detail || '确认失败', 'danger');
-                        btn.disabled = false;
-                        btn.textContent = '✅ 确认已完成观看';
-                    }
-                });
-        });
-
-        // ========== 初始化视频 URL ==========
-        function loadVideoUrl() {
-            fetch('/api/video-url')
-                .then(r => r.json())
-                .then(data => {
-                    if (data.video_url) {
-                        document.getElementById('pageVideoPlayer').src = data.video_url;
-                    }
-                });
-        }
-
-        // 修复：全局变量保存用户已选中的考试ID和表单输入值
+        // 全局变量保存用户已选中的考试ID和表单输入值
         let selectedExamId = '';
         let formInputValues = {
             student_id: '',
@@ -417,7 +283,7 @@
                     showToast(data.msg || "报名成功", 'success');
 
                     if (data.qq_group) {
-                        showQQGroupModal(data.qq_group, data.video_url);
+                        showQQGroupModal(data.qq_group);
                     }
 
                     // 报名成功后清空保存的状态
@@ -518,7 +384,7 @@
                             row3.appendChild(r3c2);
                             li.appendChild(row3);
 
-                            // 考务QQ群号
+                            // 考务QQ群号（跳转链接 + 兜底）
                             if (item.qq_group) {
                                 const rowGroup = document.createElement("div");
                                 rowGroup.className = "row mb-2";
@@ -527,26 +393,20 @@
                                 rgc1.textContent = "考务群";
                                 const rgc2 = document.createElement("div");
                                 rgc2.className = "col-9";
-                                const span = document.createElement("span");
-                                span.style.color = "#e67e22";
-                                span.textContent = `📢 请加群：${item.qq_group}`;
-                                rgc2.appendChild(span);
+                                const jumpLink = document.createElement("a");
+                                jumpLink.href = 'tencent://groupwpa?subcmd=RequestJoinGroup&group=' + item.qq_group;
+                                jumpLink.target = "_blank";
+                                jumpLink.className = "btn btn-success btn-sm me-2";
+                                jumpLink.textContent = "一键加群";
+                                rgc2.appendChild(jumpLink);
+                                const fallback = document.createElement("span");
+                                fallback.style.color = "#e67e22";
+                                fallback.innerHTML = '群号：' + item.qq_group;
+                                rgc2.appendChild(fallback);
                                 rowGroup.appendChild(rgc1);
                                 rowGroup.appendChild(rgc2);
                                 li.appendChild(rowGroup);
                             }
-
-                            // 观看视频链接
-                            const videoLink = document.createElement("a");
-                            videoLink.href = "#";
-                            videoLink.className = "btn btn-outline-primary btn-sm me-2";
-                            videoLink.textContent = "📹 观看视频";
-                            videoLink.onclick = function(e) {
-                                e.preventDefault();
-                                var el = document.getElementById('videoWatchForm');
-                                if (el) el.scrollIntoView({ behavior: 'smooth' });
-                            };
-                            li.appendChild(videoLink);
 
                             if (item.can_cancel) {
                                 const btn = document.createElement("button");
@@ -683,7 +543,6 @@
         window.addEventListener('DOMContentLoaded', () => {
             initFormInputListener();
             loadExamList();
-            loadVideoUrl();
             setInterval(loadExamList, 30000);
         });
     </script>

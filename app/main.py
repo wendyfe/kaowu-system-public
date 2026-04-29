@@ -44,9 +44,6 @@ SMTP_PASS = os.getenv("SMTP_PASS")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 465))
 
-# 考场布置视频 URL（B站嵌入链接，如 //player.bilibili.com/player.html?bvid=xxx）
-VIDEO_URL = os.getenv("KAOWU_VIDEO_URL")
-
 # ==================== FastAPI 初始化 ====================
 app = FastAPI(title="考务报名系统")
 
@@ -110,14 +107,6 @@ class VerifyCode(Base):
     email = Column(String(100), nullable=False)
     create_time = Column(DateTime, default=now_beijing)
     is_used = Column(Boolean, default=False)
-
-# 考场布置视频观看记录（按学生追踪）
-class VideoWatch(Base):
-    __tablename__ = "video_watch"
-    id = Column(Integer, primary_key=True)
-    student_id = Column(String(20), unique=True, nullable=False)
-    name = Column(String(50), nullable=False)
-    watched_at = Column(DateTime, default=now_beijing)
 
 Base.metadata.create_all(bind=engine)
 
@@ -425,12 +414,6 @@ async def view_registrations(request: Request, recruit_id: int, db: Session = De
     regs = db.query(Registration).filter(
         Registration.recruitment_id == recruit_id
     ).order_by(Registration.create_time.desc()).all()
-    # 批量查询观看状态
-    student_ids = list({r.student_id for r in regs})
-    watched_students = set()
-    if student_ids:
-        watched = db.query(VideoWatch.student_id).filter(VideoWatch.student_id.in_(student_ids)).all()
-        watched_students = {w[0] for w in watched}
     return [{
         "id": r.id,
         "student_id": r.student_id,
@@ -439,59 +422,8 @@ async def view_registrations(request: Request, recruit_id: int, db: Session = De
         "qq": r.qq,
         "has_experience": r.has_experience,
         "ip_address": r.ip_address,
-        "video_watched": r.student_id in watched_students,
         "create_time": r.create_time.strftime("%Y-%m-%d %H:%M") if r.create_time else None
     } for r in regs]
-
-# 获取视频 URL
-@app.get("/api/video-url")
-async def get_video_url():
-    return {"video_url": VIDEO_URL}
-
-# 确认已完成观看视频
-@app.post("/api/mark-video-watched")
-async def mark_video_watched(
-    student_id: str = Form(...),
-    name: str = Form(...),
-    phone: str = Form(...),
-    db: Session = Depends(get_db)
-):
-    reg = db.query(Registration).filter(
-        Registration.student_id == student_id,
-        Registration.phone == phone
-    ).first()
-    if not reg:
-        raise HTTPException(400, "学号或手机号不匹配，请确认报名信息")
-
-    existing = db.query(VideoWatch).filter(VideoWatch.student_id == student_id).first()
-    if existing:
-        return {"code": 0, "msg": "已完成观看", "watched_at": existing.watched_at.strftime("%Y-%m-%d %H:%M")}
-
-    watch = VideoWatch(student_id=student_id, name=name)
-    db.add(watch)
-    db.commit()
-    return {"code": 0, "msg": "确认成功"}
-
-# 查询视频观看状态
-@app.post("/api/video-watch-status")
-async def video_watch_status(
-    student_id: str = Form(...),
-    phone: str = Form(...),
-    db: Session = Depends(get_db)
-):
-    reg = db.query(Registration).filter(
-        Registration.student_id == student_id,
-        Registration.phone == phone
-    ).first()
-    if not reg:
-        raise HTTPException(400, "学号或手机号不匹配")
-
-    watch = db.query(VideoWatch).filter(VideoWatch.student_id == student_id).first()
-    return {
-        "code": 0,
-        "watched": watch is not None,
-        "watched_at": watch.watched_at.strftime("%Y-%m-%d %H:%M") if watch else None
-    }
 
 # 学生报名（新增QQ字段校验）
 @app.post("/api/reg")
@@ -563,7 +495,7 @@ async def student_register(
     if is_full:
         raise HTTPException(400, "报名人数已满")
 
-    return {"code": 0, "msg": "报名成功", "qq_group": recruit.qq_group, "video_url": VIDEO_URL}
+    return {"code": 0, "msg": "报名成功", "qq_group": recruit.qq_group}
 
 # 查询我的报名记录（新增可取消标识+报名ID+QQ号）
 @app.post("/api/my-registrations")
