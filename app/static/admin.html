@@ -199,12 +199,13 @@
         </div>
     </header>
 
-    <div class="container mt-5 mb-5">
-        <div class="d-flex justify-content-end mb-4">
-            <button class="btn btn-danger" onclick="logout()">退出登录</button>
-        </div>
+    <div class="content-wrapper">
+        <div class="container mt-5 mb-5">
+            <div class="d-flex justify-content-end mb-4">
+                <button class="btn btn-danger" onclick="logout()">退出登录</button>
+            </div>
 
-        <!-- 发布新招募 -->
+            <!-- 发布新招募 -->
         <div class="card p-5">
             <h3 class="mb-4">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3498db" stroke-width="2" style="vertical-align: -4px; margin-right: 6px">
@@ -229,8 +230,9 @@
                 </div>
                 <div class="row g-4 mt-2">
                     <div class="col-md-6">
-                        <label class="form-label">QQ群号 <span class="text-muted fw-normal">（可选）</span></label>
-                        <input type="text" name="qq_group" class="form-control form-control-lg" placeholder="选填，报名成功后展示给学生">
+                        <label class="form-label">QQ加群链接 <span class="text-muted fw-normal">（可选）</span></label>
+                        <input type="url" name="qq_group" class="form-control form-control-lg" placeholder="从QQ群管理复制加群链接，粘贴到此处">
+                        <div class="form-text">在QQ群 → 群管理 → 加群设置中生成加群链接（如 https://qm.qq.com/q/xxxxx）</div>
                     </div>
                 </div>
                 <button type="submit" class="btn-custom mt-4">
@@ -261,7 +263,7 @@
                 </table>
             </div>
         </div>
-    </div>
+    </div><!-- /content-wrapper -->
 
     <footer>
         <div class="container">
@@ -639,12 +641,12 @@
         document.getElementById("addRecruitForm").addEventListener("submit", async (e) => {
             e.preventDefault();
 
-            // QQ群号为空时确认
+            // QQ加群链接为空时确认
             const qqGroupVal = e.target.querySelector('input[name="qq_group"]').value.trim();
             if (!qqGroupVal) {
                 const confirmed = await showConfirm(
                     "确认发布",
-                    "你没有填写QQ群号，已报名的学生将无法加入考务群接收通知，确定继续发布？"
+                    "你没有填写QQ加群链接，已报名的学生将无法加入考务群接收通知，确定继续发布？"
                 );
                 if (!confirmed) return;
             }

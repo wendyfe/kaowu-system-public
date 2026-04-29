@@ -1,0 +1,4 @@
+{"type":"server-started","port":58964,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:58964","screen_dir":"/Users/wff/KAIfa/kaowu-system/.superpowers/brainstorm/25842-1777391069/content","state_dir":"/Users/wff/KAIfa/kaowu-system/.superpowers/brainstorm/25842-1777391069/state"}
+{"type":"screen-added","file":"/Users/wff/KAIfa/kaowu-system/.superpowers/brainstorm/25842-1777391069/content/qq-group-reminder.html"}
+{"type":"screen-added","file":"/Users/wff/KAIfa/kaowu-system/.superpowers/brainstorm/25842-1777391069/content/waiting.html"}
+{"type":"server-stopped","reason":"idle timeout"}

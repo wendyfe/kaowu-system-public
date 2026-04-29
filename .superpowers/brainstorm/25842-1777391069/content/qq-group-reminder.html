@@ -1,0 +1,97 @@
+<h2>QQ 群号提醒：几种方案示意</h2>
+<p class="subtitle">目标是：管理员发布招募时填 QQ 群号，学生看到并加入群</p>
+
+<div class="section">
+  <h3>方案 A：考试下拉列表直接显示群号</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="padding:16px;">
+      <label style="font-weight:600;display:block;margin-bottom:6px;font-size:14px;">考试项目</label>
+      <select style="width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;font-size:14px;">
+        <option>请选择考试</option>
+        <option>2026年上半年四六级（需20人/剩15人，截止：06-01） 📢 群号：123456789</option>
+        <option>2026年计算机等级考试（需15人/剩8人，截止：05-20） 📢 群号：987654321</option>
+      </select>
+      <div style="margin-top:8px;font-size:13px;color:#e67e22;background:#fef9e7;padding:8px 12px;border-radius:6px;">
+        ⚠️ 报名后请务必加入对应考试的QQ群，以便接收后续通知
+      </div>
+    </div>
+  </div>
+  <p style="margin-top:6px;font-size:13px;color:#666;">✅ 学生选考试时就能看到群号，提示醒目<br>⚠️ 下拉列表文字变长</p>
+</div>
+
+<div class="section">
+  <h3>方案 B：报名成功弹窗提示入群</h3>
+  <div class="mockup">
+    <div style="border:1px solid #ddd;border-radius:12px;padding:24px;max-width:400px;margin:0 auto;text-align:center;">
+      <div style="font-size:40px;margin-bottom:8px;">✅</div>
+      <h4 style="margin:0 0 8px 0;">报名成功！</h4>
+      <p style="font-size:14px;color:#555;margin-bottom:16px;">你已成功报名 <strong>2026年上半年四六级</strong></p>
+      <div style="background:#e8f5e9;border-radius:8px;padding:12px;margin-bottom:16px;">
+        <div style="font-size:13px;color:#2e7d32;margin-bottom:4px;">📢 请加入考务工作QQ群</div>
+        <div style="font-size:24px;font-weight:bold;color:#1565c0;letter-spacing:2px;">123456789</div>
+        <div style="font-size:12px;color:#666;margin-top:4px;">后续通知将通过群消息发布</div>
+      </div>
+      <button style="background:#3498db;color:#fff;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;">知道了</button>
+    </div>
+  </div>
+  <p style="margin-top:6px;font-size:13px;color:#666;">✅ 醒目提醒，学生必须看到群号<br>✅ 不影响下拉列表简洁性</p>
+</div>
+
+<div class="section">
+  <h3>方案 C：报名记录列表显示群号</h3>
+  <div class="mockup">
+    <div style="border:1px solid #ddd;border-radius:8px;overflow:hidden;">
+      <div style="background:#f8f9fa;padding:12px;font-weight:600;border-bottom:1px solid #ddd;">我的报名记录</div>
+      <div style="padding:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #eee;">
+          <div>
+            <div style="font-weight:600;">2026年上半年四六级</div>
+            <div style="font-size:13px;color:#666;">报名时间：2026-04-20 14:30</div>
+            <div style="font-size:13px;color:#e67e22;">📢 请加群：123456789</div>
+          </div>
+          <span class="badge" style="background:#28a745;color:#fff;padding:4px 10px;border-radius:4px;">已报名</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;">
+          <div>
+            <div style="font-weight:600;">2026年计算机等级考试</div>
+            <div style="font-size:13px;color:#666;">报名时间：2026-04-18 09:15</div>
+            <div style="font-size:13px;color:#e67e22;">📢 请加群：987654321</div>
+          </div>
+          <span class="badge" style="background:#28a745;color:#fff;padding:4px 10px;border-radius:4px;">已报名</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p style="margin-top:6px;font-size:13px;color:#666;">✅ 学生随时能在报名记录里找到群号<br>⚠️ 如果群号是报名后才补充的，已经报名的学生看不到</p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>下拉列表显示群号</h3>
+      <p>选择考试时直接看到，附加一行温馨提示</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>报名成功弹窗</h3>
+      <p>提交报名后弹出醒目对话框显示群号</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>报名记录列表显示</h3>
+      <p>我的报名中每条记录都带群号</p>
+    </div>
+  </div>
+  <div class="option" data-choice="d" onclick="toggleSelect(this)">
+    <div class="letter">D</div>
+    <div class="content">
+      <h3>全都要（推荐）</h3>
+      <p>下拉列表提示 + 报名成功弹窗 + 报名记录显示群号</p>
+    </div>
+  </div>
+</div>

@@ -28,13 +28,14 @@
         </div>
     </header>
 
-    <div class="container mt-5 mb-5">
-        <div class="tip">
-            学号8位数字，手机号11位数字，QQ号纯数字（用于接收取消报名验证码）
-        </div>
+    <div class="content-wrapper">
+        <div class="container mt-5 mb-5">
+            <div class="tip">
+                学号8位数字，手机号11位数字，QQ号纯数字（用于接收取消报名验证码）
+            </div>
 
-        <div class="card p-5 mb-4">
-            <h3 class="mb-4">报名入口</h3>
+            <div class="card p-5 mb-4">
+                <h3 class="mb-4">报名入口</h3>
             <form id="regForm">
                 <div class="mb-3">
                     <label class="form-label">考试项目</label>
@@ -110,7 +111,7 @@
         </div>
     </div>
 
-    <!-- 报名成功弹窗（含视频） -->
+    <!-- 报名成功弹窗 -->
     <div class="modal fade" id="qqGroupModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content" style="border-radius:16px;">
@@ -122,9 +123,8 @@
                     <div style="background:#e8f5e9;border-radius:12px;padding:20px;margin-bottom:16px;">
                         <div style="font-size:14px;color:#2e7d32;margin-bottom:12px;">📢 请加入考务工作QQ群</div>
                         <a id="qqGroupJumpLink" href="#" target="_blank" class="btn btn-success btn-lg mb-2">一键加入QQ群</a>
-                        <div style="font-size:14px;color:#555;">
-                            群号：<span id="qqGroupNumber" style="font-weight:bold;color:#1565c0;"></span>
-                            <span style="font-size:12px;color:#999;">（如无法跳转请手动复制）</span>
+                        <div style="font-size:13px;color:#555;word-break:break-all;">
+                            加群链接：<span id="qqGroupLinkText" style="color:#1565c0;"></span>
                         </div>
                     </div>
                     <button type="button" id="qqGroupDismissBtn" class="btn btn-primary btn-lg px-5">知道了</button>
@@ -132,6 +132,8 @@
             </div>
         </div>
     </div>
+
+    </div><!-- /content-wrapper -->
 
     <footer>
         <div class="container">
@@ -162,8 +164,8 @@
             const selectedOpt = examSelect.options[examSelect.selectedIndex];
             const examName = selectedOpt ? selectedOpt.textContent.split('（')[0] : '';
             document.getElementById('qqGroupExamName').textContent = `「${examName}」`;
-            document.getElementById('qqGroupNumber').textContent = qqGroup;
-            document.getElementById('qqGroupJumpLink').href = 'tencent://groupwpa?subcmd=RequestJoinGroup&group=' + qqGroup;
+            document.getElementById('qqGroupJumpLink').href = qqGroup;
+            document.getElementById('qqGroupLinkText').textContent = qqGroup;
 
             qqGroupModalInstance.show();
         }
@@ -384,7 +386,7 @@
                             row3.appendChild(r3c2);
                             li.appendChild(row3);
 
-                            // 考务QQ群号（跳转链接 + 兜底）
+                            // 考务QQ加群链接
                             if (item.qq_group) {
                                 const rowGroup = document.createElement("div");
                                 rowGroup.className = "row mb-2";
@@ -394,15 +396,16 @@
                                 const rgc2 = document.createElement("div");
                                 rgc2.className = "col-9";
                                 const jumpLink = document.createElement("a");
-                                jumpLink.href = 'tencent://groupwpa?subcmd=RequestJoinGroup&group=' + item.qq_group;
+                                jumpLink.href = item.qq_group;
                                 jumpLink.target = "_blank";
                                 jumpLink.className = "btn btn-success btn-sm me-2";
                                 jumpLink.textContent = "一键加群";
                                 rgc2.appendChild(jumpLink);
-                                const fallback = document.createElement("span");
-                                fallback.style.color = "#e67e22";
-                                fallback.innerHTML = '群号：' + item.qq_group;
-                                rgc2.appendChild(fallback);
+                                const linkInfo = document.createElement("span");
+                                linkInfo.style.color = "#e67e22";
+                                linkInfo.style.fontSize = "12px";
+                                linkInfo.textContent = item.qq_group;
+                                rgc2.appendChild(linkInfo);
                                 rowGroup.appendChild(rgc1);
                                 rowGroup.appendChild(rgc2);
                                 li.appendChild(rowGroup);
