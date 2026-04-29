@@ -26,7 +26,7 @@ body {
 }
 
 .btn-custom {
-    background: #3498db;
+    background: #0d6efd;
     color: white;
     border: none;
     border-radius: 8px;
@@ -35,22 +35,12 @@ body {
 }
 
 .btn-custom:hover {
-    background: #2980b9;
+    background: #0b5ed7;
     color: white;
-}
-
-.btn-danger-custom {
-    background: #e74c3c;
-    color: white;
-    border: none;
-}
-
-.btn-danger-custom:hover {
-    background: #c0392b;
 }
 
 .tip {
-    background: rgba(52, 152, 219, 0.1);
+    background: rgba(13, 110, 253, 0.08);
     border-radius: 8px;
     padding: 1rem;
     margin-bottom: 1.5rem;
@@ -67,4 +57,22 @@ body {
 
 .toast-container {
     margin-top: 60px;
+}
+
+/* 页脚：不固定，随内容自然排列 */
+footer {
+    background: #2c3e50;
+    color: white;
+    padding: 1rem 0;
+    text-align: center;
+    margin-top: 2rem;
+}
+
+footer p {
+    margin-bottom: 0;
+}
+
+/* 给主内容区留底部空间，避免被固定元素遮挡 */
+.container.mt-5.mb-5 {
+    padding-bottom: 1rem;
 }
