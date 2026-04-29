@@ -71,6 +71,36 @@
             </form>
         </div>
 
+        <!-- 考场布置视频 -->
+        <div class="card p-5 mb-4">
+            <h3 class="mb-4">📹 考场布置要求视频</h3>
+            <p class="text-muted mb-3" style="font-size:14px;">请认真观看，了解考场布置规范和注意事项</p>
+            <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px;margin-bottom:16px;">
+                <iframe id="pageBilibiliPlayer" style="position:absolute;top:0;left:0;width:100%;height:100%;"
+                        src="" scrolling="no" border="0" frameborder="0"
+                        allowfullscreen="true" sandbox="allow-scripts allow-same-origin allow-popups">
+                </iframe>
+            </div>
+            <div id="videoWatchForm" class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label">学号</label>
+                    <input type="text" id="videoStudentId" class="form-control" placeholder="8位数字">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">姓名</label>
+                    <input type="text" id="videoName" class="form-control" placeholder="姓名">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">手机号</label>
+                    <input type="text" id="videoPhone" class="form-control" placeholder="11位数字">
+                </div>
+                <div class="col-md-3">
+                    <button type="button" id="pageConfirmWatchedBtn" class="btn btn-success w-100">✅ 确认已完成观看</button>
+                </div>
+            </div>
+            <div id="videoWatchResult" class="mt-2" style="display:none;"></div>
+        </div>
+
         <div class="card p-5">
             <h3 class="mb-4">查询我的报名记录</h3>
             <form id="myRegForm" class="mb-4">
@@ -109,20 +139,36 @@
         </div>
     </div>
 
-    <!-- QQ群入群提醒弹窗 -->
+    <!-- 报名成功弹窗（含视频） -->
     <div class="modal fade" id="qqGroupModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content" style="border-radius:16px;">
-                <div class="modal-body text-center py-5 px-4">
+                <div class="modal-body text-center py-4 px-4">
                     <div style="font-size:48px;margin-bottom:12px;">✅</div>
                     <h4 class="mb-2">报名成功！</h4>
-                    <p class="text-muted mb-4" id="qqGroupExamName" style="font-size:15px;"></p>
+                    <p class="text-muted mb-3" id="qqGroupExamName" style="font-size:15px;"></p>
+
+                    <!-- 视频区域 -->
+                    <div id="modalVideoSection" class="mb-3" style="display:none;">
+                        <p class="text-muted mb-2" style="font-size:14px;">📹 请观看考场布置要求视频</p>
+                        <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px;">
+                            <iframe id="modalBilibiliPlayer" style="position:absolute;top:0;left:0;width:100%;height:100%;"
+                                    src="" scrolling="no" border="0" frameborder="0"
+                                    allowfullscreen="true" sandbox="allow-scripts allow-same-origin allow-popups">
+                            </iframe>
+                        </div>
+                        <div class="mt-2 d-flex justify-content-center align-items-center gap-2">
+                            <button type="button" id="modalConfirmWatchedBtn" class="btn btn-outline-success btn-sm">✅ 我已完成观看</button>
+                            <span id="modalWatchedBadge" class="badge bg-success" style="display:none;">已记录</span>
+                        </div>
+                    </div>
+
                     <div style="background:#e8f5e9;border-radius:12px;padding:16px;margin-bottom:16px;">
                         <div style="font-size:14px;color:#2e7d32;margin-bottom:6px;">📢 请加入考务工作QQ群</div>
                         <div id="qqGroupNumber" style="font-size:28px;font-weight:bold;color:#1565c0;letter-spacing:2px;"></div>
                         <div style="font-size:13px;color:#666;margin-top:6px;">后续通知将通过群消息发布</div>
                     </div>
-                    <button type="button" class="btn btn-primary btn-lg px-5" data-bs-dismiss="modal">知道了</button>
+                    <button type="button" id="qqGroupDismissBtn" class="btn btn-primary btn-lg px-5">知道了</button>
                 </div>
             </div>
         </div>
@@ -145,21 +191,124 @@
             bootstrap.Toast.getOrCreateInstance(toastEl).show();
         }
 
-        // QQ群入群提醒
+        // ========== 视频 + QQ群弹窗 ==========
         let qqGroupModalInstance = null;
 
-        function showQQGroupModal(qqGroup) {
+        function showQQGroupModal(qqGroup, videoUrl) {
             if (!qqGroupModalInstance) {
                 qqGroupModalInstance = new bootstrap.Modal(document.getElementById('qqGroupModal'), { backdrop: 'static', keyboard: false });
             }
-            // 从下拉列表找到当前选中的考试名称
+
             const examSelect = document.getElementById('examSelect');
             const selectedOpt = examSelect.options[examSelect.selectedIndex];
             const examName = selectedOpt ? selectedOpt.textContent.split('（')[0] : '';
-
             document.getElementById('qqGroupExamName').textContent = `「${examName}」`;
             document.getElementById('qqGroupNumber').textContent = qqGroup;
+
+            const videoSection = document.getElementById('modalVideoSection');
+            const confirmBtn = document.getElementById('modalConfirmWatchedBtn');
+            const badge = document.getElementById('modalWatchedBadge');
+
+            if (videoUrl) {
+                videoSection.style.display = 'block';
+                document.getElementById('modalBilibiliPlayer').src = videoUrl;
+                confirmBtn.style.display = 'inline-block';
+                badge.style.display = 'none';
+            } else {
+                videoSection.style.display = 'none';
+            }
+
             qqGroupModalInstance.show();
+        }
+
+        // 弹窗关闭按钮
+        document.getElementById('qqGroupDismissBtn').addEventListener('click', function() {
+            if (qqGroupModalInstance) qqGroupModalInstance.hide();
+        });
+
+        // 弹窗内确认观看
+        document.getElementById('modalConfirmWatchedBtn').addEventListener('click', function() {
+            const studentId = formInputValues.student_id;
+            const name = formInputValues.name;
+            const phone = formInputValues.phone;
+            if (!studentId || !name || !phone) {
+                showToast('报名信息缺失，请重新报名', 'warning');
+                return;
+            }
+            const formData = new FormData();
+            formData.append('student_id', studentId);
+            formData.append('name', name);
+            formData.append('phone', phone);
+            const btn = document.getElementById('modalConfirmWatchedBtn');
+            btn.disabled = true;
+            btn.textContent = '提交中...';
+            fetch('/api/mark-video-watched', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.code === 0) {
+                        btn.style.display = 'none';
+                        document.getElementById('modalWatchedBadge').style.display = 'inline';
+                        showToast('观看记录已保存', 'success');
+                    } else {
+                        showToast(data.detail || '确认失败', 'danger');
+                        btn.disabled = false;
+                        btn.textContent = '✅ 我已完成观看';
+                    }
+                });
+        });
+
+        // 弹窗关闭时清理
+        document.getElementById('qqGroupModal').addEventListener('hidden.bs.modal', function() {
+            document.getElementById('modalBilibiliPlayer').src = '';
+            document.getElementById('modalConfirmWatchedBtn').style.display = 'inline-block';
+            document.getElementById('modalConfirmWatchedBtn').disabled = false;
+            document.getElementById('modalConfirmWatchedBtn').textContent = '✅ 我已完成观看';
+            document.getElementById('modalWatchedBadge').style.display = 'none';
+        });
+
+        // ========== 独立视频区确认观看 ==========
+        document.getElementById('pageConfirmWatchedBtn').addEventListener('click', function() {
+            const studentId = document.getElementById('videoStudentId').value.trim();
+            const name = document.getElementById('videoName').value.trim();
+            const phone = document.getElementById('videoPhone').value.trim();
+            if (!studentId || !name || !phone) {
+                showToast('请填写学号、姓名和手机号', 'warning');
+                return;
+            }
+            const formData = new FormData();
+            formData.append('student_id', studentId);
+            formData.append('name', name);
+            formData.append('phone', phone);
+            const btn = document.getElementById('pageConfirmWatchedBtn');
+            btn.disabled = true;
+            btn.textContent = '提交中...';
+            fetch('/api/mark-video-watched', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.code === 0) {
+                        const result = document.getElementById('videoWatchResult');
+                        result.style.display = 'block';
+                        result.innerHTML = `<div class="alert alert-success py-2 mb-0">✅ 观看记录已保存（${data.watched_at || '已记录'}）</div>`;
+                        btn.disabled = false;
+                        btn.textContent = '✅ 确认已完成观看';
+                        showToast('观看记录已保存', 'success');
+                    } else {
+                        showToast(data.detail || '确认失败', 'danger');
+                        btn.disabled = false;
+                        btn.textContent = '✅ 确认已完成观看';
+                    }
+                });
+        });
+
+        // ========== 初始化视频 URL ==========
+        function loadVideoUrl() {
+            fetch('/api/video-url')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.video_url) {
+                        document.getElementById('pageBilibiliPlayer').src = data.video_url;
+                    }
+                });
         }
 
         // 修复：全局变量保存用户已选中的考试ID和表单输入值
@@ -271,9 +420,8 @@
                     data = await res.json();
                     showToast(data.msg || "报名成功", 'success');
 
-                    // 如有QQ群号，弹窗提醒加群
                     if (data.qq_group) {
-                        showQQGroupModal(data.qq_group);
+                        showQQGroupModal(data.qq_group, data.video_url);
                     }
 
                     // 报名成功后清空保存的状态
@@ -391,6 +539,17 @@
                                 rowGroup.appendChild(rgc2);
                                 li.appendChild(rowGroup);
                             }
+
+                            // 观看视频链接
+                            const videoLink = document.createElement("a");
+                            videoLink.href = "#";
+                            videoLink.className = "btn btn-outline-primary btn-sm me-2";
+                            videoLink.textContent = "📹 观看视频";
+                            videoLink.onclick = function(e) {
+                                e.preventDefault();
+                                document.querySelector('#videoWatchForm').scrollIntoView({ behavior: 'smooth' });
+                            };
+                            li.appendChild(videoLink);
 
                             if (item.can_cancel) {
                                 const btn = document.createElement("button");
@@ -527,6 +686,7 @@
         window.addEventListener('DOMContentLoaded', () => {
             initFormInputListener();
             loadExamList();
+            loadVideoUrl();
             setInterval(loadExamList, 30000);
         });
     </script>

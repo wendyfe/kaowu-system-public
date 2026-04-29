@@ -135,6 +135,7 @@
                                     <th>手机号</th>
                                     <th>QQ号</th>
                                     <th>经验</th>
+                                    <th>已观视频</th>
                                     <th>报名时间</th>
                                     <th>IP地址</th>
                                 </tr>
@@ -567,6 +568,17 @@
                     const tdExp = document.createElement("td");
                     tdExp.textContent = r.has_experience ? "有" : "无";
                     tr.appendChild(tdExp);
+
+                    const tdWatch = document.createElement("td");
+                    if (r.video_watched) {
+                        tdWatch.textContent = "✅ 已观看";
+                        tdWatch.className = 'text-success';
+                    } else {
+                        tdWatch.textContent = "❌ 未观看";
+                        tdWatch.className = 'text-danger';
+                    }
+                    tdWatch.style.fontSize = '0.85rem';
+                    tr.appendChild(tdWatch);
 
                     const tdTime = document.createElement("td");
                     tdTime.textContent = r.create_time;
