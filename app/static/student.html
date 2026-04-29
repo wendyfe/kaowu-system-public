@@ -75,12 +75,10 @@
         <div class="card p-5 mb-4">
             <h3 class="mb-4">📹 考场布置要求视频</h3>
             <p class="text-muted mb-3" style="font-size:14px;">请认真观看，了解考场布置规范和注意事项</p>
-            <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px;margin-bottom:16px;">
-                <iframe id="pageBilibiliPlayer" style="position:absolute;top:0;left:0;width:100%;height:100%;"
-                        src="" scrolling="no" border="0" frameborder="0"
-                        allowfullscreen="true" >
-                </iframe>
-            </div>
+            <video id="pageVideoPlayer" controls
+                   style="width:100%;max-width:720px;border-radius:8px;background:#000;"
+                   src="">
+            </video>
             <div id="videoWatchForm" class="row g-2 align-items-end">
                 <div class="col-md-3">
                     <label class="form-label">学号</label>
@@ -151,12 +149,10 @@
                     <!-- 视频区域 -->
                     <div id="modalVideoSection" class="mb-3" style="display:none;">
                         <p class="text-muted mb-2" style="font-size:14px;">📹 请观看考场布置要求视频</p>
-                        <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px;">
-                            <iframe id="modalBilibiliPlayer" style="position:absolute;top:0;left:0;width:100%;height:100%;"
-                                    src="" scrolling="no" border="0" frameborder="0"
-                                    allowfullscreen="true" >
-                            </iframe>
-                        </div>
+                        <video id="modalVideoPlayer" controls
+                               style="width:100%;max-width:480px;border-radius:8px;background:#000;"
+                               src="">
+                        </video>
                         <div class="mt-2 d-flex justify-content-center align-items-center gap-2">
                             <button type="button" id="modalConfirmWatchedBtn" class="btn btn-outline-success btn-sm">✅ 我已完成观看</button>
                             <span id="modalWatchedBadge" class="badge bg-success" style="display:none;">已记录</span>
@@ -211,7 +207,7 @@
 
             if (videoUrl) {
                 videoSection.style.display = 'block';
-                document.getElementById('modalBilibiliPlayer').src = videoUrl;
+                document.getElementById('modalVideoPlayer').src = videoUrl;
                 confirmBtn.style.display = 'inline-block';
                 badge.style.display = 'none';
             } else {
@@ -259,7 +255,7 @@
 
         // 弹窗关闭时清理
         document.getElementById('qqGroupModal').addEventListener('hidden.bs.modal', function() {
-            document.getElementById('modalBilibiliPlayer').src = '';
+            document.getElementById('modalVideoPlayer').src = '';
             document.getElementById('modalConfirmWatchedBtn').style.display = 'inline-block';
             document.getElementById('modalConfirmWatchedBtn').disabled = false;
             document.getElementById('modalConfirmWatchedBtn').textContent = '✅ 我已完成观看';
@@ -306,7 +302,7 @@
                 .then(r => r.json())
                 .then(data => {
                     if (data.video_url) {
-                        document.getElementById('pageBilibiliPlayer').src = data.video_url;
+                        document.getElementById('pageVideoPlayer').src = data.video_url;
                     }
                 });
         }
