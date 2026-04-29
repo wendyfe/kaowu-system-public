@@ -404,6 +404,27 @@ async def get_admin_recruit_list(request: Request, db: Session = Depends(get_db)
         })
     return result
 
+# 查看报名名单（管理端页面内查看）
+@app.get("/api/recruit/{recruit_id}/registrations")
+async def view_registrations(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    check_admin_login(request)
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+    regs = db.query(Registration).filter(
+        Registration.recruitment_id == recruit_id
+    ).order_by(Registration.create_time.desc()).all()
+    return [{
+        "id": r.id,
+        "student_id": r.student_id,
+        "name": r.name,
+        "phone": r.phone,
+        "qq": r.qq,
+        "has_experience": r.has_experience,
+        "ip_address": r.ip_address,
+        "create_time": r.create_time.strftime("%Y-%m-%d %H:%M") if r.create_time else None
+    } for r in regs]
+
 # 学生报名（新增QQ字段校验）
 @app.post("/api/reg")
 async def student_register(
