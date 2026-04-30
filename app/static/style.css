@@ -98,16 +98,19 @@ body {
 
 /* 表格操作列 */
 .table-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.15rem;
+    white-space: nowrap;
 }
 .table .action-link {
-    padding: 0.2rem 0.5rem;
+    display: inline-block;
+    padding: 0.15rem 0.45rem;
+    margin-right: 0.15rem;
     border-radius: 4px;
     font-size: 0.85rem;
     text-decoration: none !important;
     transition: background 0.15s;
+}
+.table .action-link:last-child {
+    margin-right: 0;
 }
 .table .action-link:hover {
     background: #e9ecef;
