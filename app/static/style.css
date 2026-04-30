@@ -100,10 +100,10 @@ body {
 .table .action-link {
     display: inline-block;
     padding: 0.2rem 0.5rem;
-    margin-right: 0.2rem;
-    margin-bottom: 0.2rem;
+    margin-right: 0.35rem;
+    margin-bottom: 0.25rem;
     border-radius: 4px;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     text-decoration: none;
     transition: background 0.15s;
     white-space: nowrap;
