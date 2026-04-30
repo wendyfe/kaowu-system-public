@@ -288,7 +288,7 @@ async def add_recruit(
     db.refresh(recruit)
     return {"code": 0, "msg": "发布成功"}
 
-# 编辑招募（不变）
+# 编辑招募
 @app.put("/api/recruit/{recruit_id}")
 async def edit_recruit(
     request: Request,
@@ -296,6 +296,7 @@ async def edit_recruit(
     exam_name: str = Form(...),
     need_num: int = Form(...),
     end_time_str: str = Form(None),
+    qq_group: str = Form(None),
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
@@ -318,6 +319,7 @@ async def edit_recruit(
             recruit.end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M")
         except:
             raise HTTPException(400, "结束时间格式错误")
+    recruit.qq_group = qq_group.strip() if qq_group and qq_group.strip() else None
     db.commit()
     return {"code": 0, "msg": "修改成功"}
 
@@ -400,7 +402,8 @@ async def get_admin_recruit_list(request: Request, db: Session = Depends(get_db)
             "need_num": r.need_num,
             "registered": count_val,
             "end_time": r.end_time.strftime("%Y-%m-%d %H:%M") if r.end_time else None,
-            "status": status
+            "status": status,
+            "qq_group": r.qq_group
         })
     return result
 

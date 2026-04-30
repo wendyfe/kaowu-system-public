@@ -174,10 +174,15 @@
                     <label class="form-label">招募人数</label>
                     <input type="number" class="form-control form-control-lg" id="editNeedNum" min="1" placeholder="请输入人数">
                 </div>
-                <div class="mb-0">
+                <div class="mb-3">
                     <label class="form-label">截止时间</label>
                     <input type="text" class="form-control form-control-lg" id="editEndTime" placeholder="点击选择日期和时间">
                     <div class="form-text mt-2">留空表示不限制截止时间</div>
+                </div>
+                <div class="mb-0">
+                    <label class="form-label">QQ加群链接 <span class="text-muted fw-normal">（可选）</span></label>
+                    <input type="url" class="form-control form-control-lg" id="editQqGroup" placeholder="从QQ群管理复制加群链接，粘贴到此处">
+                    <div class="form-text mt-2">留空不修改</div>
                 </div>
             </div>
 
@@ -330,12 +335,13 @@
         let currentEditOldData = null;
         const editOffcanvas = new bootstrap.Offcanvas(document.getElementById('editOffcanvas'));
 
-        function openEditPanel(id, oldName, oldNum, oldEndTime) {
+        function openEditPanel(id, oldName, oldNum, oldEndTime, oldQqGroup) {
             currentEditId = id;
             currentEditOldData = { name: oldName, num: oldNum, endTime: oldEndTime };
 
             document.getElementById('editExamName').value = oldName;
             document.getElementById('editNeedNum').value = oldNum;
+            document.getElementById('editQqGroup').value = oldQqGroup || '';
 
             // 设置日期选择器的值（后端格式 "YYYY-MM-DD HH:MM" → flatpickr 自动解析）
             editPicker.setDate(oldEndTime && oldEndTime.trim() ? oldEndTime : '', false);
@@ -347,6 +353,7 @@
             const newName = document.getElementById('editExamName').value.trim();
             const newNumStr = document.getElementById('editNeedNum').value;
             const newEndTime = editPicker.input.value.trim() || null;
+            const newQqGroup = document.getElementById('editQqGroup').value.trim() || '';
 
             if (!newName) {
                 showToast('考试名称不能为空', 'warning');
@@ -371,6 +378,7 @@
             formData.append('exam_name', newName);
             formData.append('need_num', newNum);
             if (newEndTime) formData.append('end_time_str', newEndTime);
+            if (newQqGroup) formData.append('qq_group', newQqGroup);
 
             try {
                 const res = await fetch(`/api/recruit/${currentEditId}`, {
@@ -461,7 +469,7 @@
                     editLink.textContent = "编辑";
                     editLink.onclick = function (e) {
                         e.preventDefault();
-                        openEditPanel(item.id, item.exam_name, item.need_num, item.end_time);
+                        openEditPanel(item.id, item.exam_name, item.need_num, item.end_time, item.qq_group);
                     };
                     tdActions.appendChild(editLink);
 

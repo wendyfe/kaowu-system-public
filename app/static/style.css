@@ -61,6 +61,18 @@ body {
     font-weight: 500;
 }
 
+/* 占位符颜色调浅 */
+::placeholder {
+    color: #c5c9ce !important;
+    opacity: 1;
+}
+input::placeholder,
+textarea::placeholder,
+select::placeholder {
+    color: #c5c9ce !important;
+    opacity: 1;
+}
+
 .modal-content {
     border-radius: 12px;
 }
