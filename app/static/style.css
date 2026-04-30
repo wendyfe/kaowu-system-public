@@ -61,6 +61,61 @@ body {
     font-weight: 500;
 }
 
+/* 表格统一样式 */
+.table th {
+    background: #0d6efd;
+    color: white;
+    font-weight: 500;
+}
+.table {
+    border-radius: 12px;
+    overflow: hidden;
+}
+.table tr:hover {
+    background-color: #f8f9fa;
+}
+
+/* 侧滑面板表单分组 */
+.form-section {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+}
+.form-section .form-label {
+    font-size: 0.9rem;
+    margin-bottom: 0.4rem;
+}
+
+/* 编辑面板 header */
+.offcanvas-header {
+    border-bottom: 1px solid #e9ecef;
+    padding: 1.25rem 1.5rem;
+}
+.offcanvas-body {
+    padding: 1.5rem;
+}
+
+/* 表格操作列链接 */
+.table .action-link {
+    display: inline-block;
+    padding: 0.25rem 0.6rem;
+    margin-right: 0.35rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    text-decoration: none;
+    transition: background 0.15s;
+}
+.table .action-link:last-child {
+    margin-right: 0;
+}
+.table .action-link:hover {
+    background: #e9ecef;
+}
+.table .action-link.text-danger:hover {
+    background: #fef2f2;
+}
+
 /* 占位符颜色调浅 */
 ::placeholder {
     color: #c5c9ce !important;

@@ -8,34 +8,6 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link href="/static/style.css" rel="stylesheet">
     <style>
-        .btn-danger {
-            padding: 0.5rem 1rem;
-            font-size: 0.9rem;
-        }
-        table {
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        th {
-            background: #3498db;
-            color: white;
-        }
-        tr:hover {
-            background-color: #f8f9fa;
-        }
-        /* 侧滑面板卡片式分组 */
-        .offcanvas-body .form-section {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 1.25rem;
-            margin-bottom: 1rem;
-        }
-        .offcanvas-body .form-section .form-label {
-            font-weight: 600;
-            font-size: 0.9rem;
-            color: #495057;
-            margin-bottom: 0.4rem;
-        }
         /* Flatpickr 与 Bootstrap 风格统一 */
         .flatpickr-input {
             background-color: #fff !important;
@@ -50,41 +22,14 @@
         .flatpickr-day.startRange,
         .flatpickr-day.endRange,
         .flatpickr-day.inRange {
-            background: #3498db !important;
-            border-color: #3498db !important;
+            background: #0d6efd !important;
+            border-color: #0d6efd !important;
         }
         .flatpickr-day.today {
-            border-color: #3498db !important;
+            border-color: #0d6efd !important;
         }
         .flatpickr-current-month .flatpickr-monthDropdown-months:hover {
             background: transparent !important;
-        }
-        /* 编辑面板 header */
-        .offcanvas-header {
-            border-bottom: 1px solid #e9ecef;
-            padding: 1.25rem 1.5rem;
-        }
-        .offcanvas-body {
-            padding: 1.5rem;
-        }
-        /* 表格操作列按钮式链接 */
-        .table .action-link {
-            display: inline-block;
-            padding: 0.25rem 0.6rem;
-            margin-right: 0.35rem;
-            border-radius: 4px;
-            font-size: 0.85rem;
-            text-decoration: none;
-            transition: background 0.15s;
-        }
-        .table .action-link:last-child {
-            margin-right: 0;
-        }
-        .table .action-link:hover {
-            background: #e9ecef;
-        }
-        .table .action-link.text-danger:hover {
-            background: #fef2f2;
         }
     </style>
 </head>
@@ -111,7 +56,7 @@
                 <div class="modal-body" id="confirmMessage"></div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-danger" id="confirmBtn">确定</button>
+                    <button type="button" class="btn btn-outline-danger" id="confirmBtn">确定</button>
                 </div>
             </div>
         </div>
@@ -120,7 +65,7 @@
     <!-- 查看报名名单弹窗 -->
     <div class="modal fade" id="viewRegistrationsModal" tabindex="-1">
         <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
-            <div class="modal-content" style="border-radius:12px;">
+            <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="viewRegTitle">报名名单</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -168,26 +113,26 @@
             <div class="form-section">
                 <div class="mb-3">
                     <label class="form-label">考试名称</label>
-                    <input type="text" class="form-control form-control" id="editExamName" placeholder="如：2026年上半年四六级考试">
+                    <input type="text" class="form-control" id="editExamName" placeholder="如：2026年上半年四六级考试">
                 </div>
                 <div class="mb-3">
                     <label class="form-label">招募人数</label>
-                    <input type="number" class="form-control form-control" id="editNeedNum" min="1" placeholder="请输入人数">
+                    <input type="number" class="form-control" id="editNeedNum" min="1" placeholder="请输入人数">
                 </div>
                 <div class="mb-3">
                     <label class="form-label">截止时间</label>
-                    <input type="text" class="form-control form-control" id="editEndTime" placeholder="点击选择日期和时间">
+                    <input type="text" class="form-control" id="editEndTime" placeholder="点击选择日期和时间">
                     <div class="form-text mt-2">留空表示不限制截止时间</div>
                 </div>
                 <div class="mb-0">
                     <label class="form-label">QQ加群链接 <span class="text-muted fw-normal">（可选）</span></label>
-                    <input type="url" class="form-control form-control" id="editQqGroup" placeholder="从QQ群管理复制加群链接，粘贴到此处">
+                    <input type="url" class="form-control" id="editQqGroup" placeholder="从QQ群管理复制加群链接，粘贴到此处">
                     <div class="form-text mt-2">留空不修改</div>
                 </div>
             </div>
 
             <div class="d-grid gap-2 mt-4" style="position: sticky; bottom: 0; background: #fff; padding-top: 1rem;">
-                <button class="btn btn-primary" id="editConfirmBtn">
+                <button class="btn btn-custom" id="editConfirmBtn">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -3px; margin-right: 4px">
                         <polyline points="20 6 9 17 4 12"/>
                     </svg>
@@ -199,9 +144,10 @@
     </div>
 
     <header class="header">
-        <div class="container d-flex justify-content-between align-items-center">
-            <h1 class="mb-0">考务招募管理后台</h1>
-            <button class="btn btn-outline-light btn-sm px-3" onclick="logout()">退出登录</button>
+        <div class="container position-relative text-center">
+            <h1 class="mb-1">考务招募管理后台</h1>
+            <p class="lead mb-0" style="font-size:1rem;">发布招募 · 管理报名 · 导出数据</p>
+            <button class="btn btn-outline-light btn-sm position-absolute end-0" onclick="logout()" style="top:50%;transform:translateY(-50%);">退出登录</button>
         </div>
     </header>
 
@@ -211,7 +157,7 @@
             <!-- 发布新招募 -->
         <div class="card p-5 mb-4">
             <h3 class="mb-4">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3498db" stroke-width="2" style="vertical-align: -4px; margin-right: 6px">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0d6efd" stroke-width="2" style="vertical-align: -4px; margin-right: 6px">
                     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
                 发布新招募
@@ -220,21 +166,21 @@
                 <div class="row g-4">
                     <div class="col-md-5">
                         <label class="form-label">考试名称</label>
-                        <input type="text" name="exam_name" class="form-control form-control" required placeholder="如：2026年上半年四六级考试">
+                        <input type="text" name="exam_name" class="form-control" required placeholder="如：2026年上半年四六级考试">
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">招募人数</label>
-                        <input type="number" name="need_num" class="form-control form-control" min="1" required placeholder="请输入人数">
+                        <input type="number" name="need_num" class="form-control" min="1" required placeholder="请输入人数">
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">截止时间 <span class="text-muted fw-normal">（可选）</span></label>
-                        <input type="text" class="form-control form-control" id="publishEndTime" placeholder="点击选择截止时间">
+                        <input type="text" class="form-control" id="publishEndTime" placeholder="点击选择截止时间">
                     </div>
                 </div>
                 <div class="row g-4 mt-2">
                     <div class="col-md-6">
                         <label class="form-label">QQ加群链接 <span class="text-muted fw-normal">（可选）</span></label>
-                        <input type="url" name="qq_group" class="form-control form-control" placeholder="从QQ群管理复制加群链接，粘贴到此处">
+                        <input type="url" name="qq_group" class="form-control" placeholder="从QQ群管理复制加群链接，粘贴到此处">
                         <div class="form-text">在QQ群 → 群管理 → 加群设置中生成加群链接（如 https://qm.qq.com/q/xxxxx）</div>
                     </div>
                 </div>

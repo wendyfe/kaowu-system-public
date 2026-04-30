@@ -68,7 +68,7 @@
                         <label class="form-check-label">无</label>
                     </div>
                 </div>
-                <button type="submit" class="btn-custom w-100">提交报名</button>
+                <button type="submit" class="btn btn-custom w-100">提交报名</button>
             </form>
         </div>
 <!-- end regForm card -->
@@ -84,7 +84,7 @@
                     <label class="form-label">手机号</label>
                     <input type="text" id="myPhone" class="form-control" placeholder="11位数字手机号" required>
                 </div>
-                <button type="submit" class="btn-custom w-100">查询</button>
+                <button type="submit" class="btn btn-custom w-100">查询</button>
             </form>
             <div id="myList"></div>
         </div>
@@ -104,8 +104,8 @@
                         <label class="form-label">QQ邮箱验证码</label>
                         <input type="text" id="verifyCode" class="form-control" placeholder="输入收到的6位验证码" required>
                     </div>
-                    <button type="button" id="sendCodeBtn" class="btn-custom w-100 mb-3">发送验证码到QQ邮箱</button>
-                    <button type="button" id="confirmCancelBtn" class="btn-custom w-100">确认取消</button>
+                    <button type="button" id="sendCodeBtn" class="btn btn-custom w-100 mb-3">发送验证码到QQ邮箱</button>
+                    <button type="button" id="confirmCancelBtn" class="btn btn-custom w-100">确认取消</button>
                 </div>
             </div>
         </div>
@@ -114,7 +114,7 @@
     <!-- 报名成功弹窗 -->
     <div class="modal fade" id="qqGroupModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered modal-lg">
-            <div class="modal-content" style="border-radius:16px;">
+            <div class="modal-content">
                 <div class="modal-body text-center py-4 px-4">
                     <div style="font-size:48px;margin-bottom:12px;">✅</div>
                     <h4 class="mb-2">报名成功！</h4>
@@ -124,10 +124,10 @@
                         <div style="font-size:14px;color:#2e7d32;margin-bottom:12px;">📢 请加入考务工作QQ群</div>
                         <a id="qqGroupJumpLink" href="#" target="_blank" class="btn btn-success btn-lg mb-2">一键加入QQ群</a>
                         <div style="font-size:13px;color:#555;word-break:break-all;">
-                            加群链接：<span id="qqGroupLinkText" style="color:#1565c0;"></span>
+                            加群链接：<span id="qqGroupLinkText" style="color:#0d6efd;"></span>
                         </div>
                     </div>
-                    <button type="button" id="qqGroupDismissBtn" class="btn btn-primary btn-lg px-5">知道了</button>
+                    <button type="button" id="qqGroupDismissBtn" class="btn btn-custom px-5">知道了</button>
                 </div>
             </div>
         </div>
@@ -402,7 +402,7 @@
                                 jumpLink.textContent = "一键加群";
                                 rgc2.appendChild(jumpLink);
                                 const linkInfo = document.createElement("span");
-                                linkInfo.style.color = "#e67e22";
+                                linkInfo.style.color = "#6c757d";
                                 linkInfo.style.fontSize = "12px";
                                 linkInfo.textContent = item.qq_group;
                                 rgc2.appendChild(linkInfo);
