@@ -96,20 +96,18 @@ body {
     padding: 1.5rem;
 }
 
-/* 表格操作列链接 */
+/* 表格操作列 */
+.table-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
 .table .action-link {
-    display: inline-block;
     padding: 0.2rem 0.5rem;
-    margin-right: 0.35rem;
-    margin-bottom: 0.25rem;
     border-radius: 4px;
     font-size: 0.85rem;
-    text-decoration: none;
+    text-decoration: none !important;
     transition: background 0.15s;
-    white-space: nowrap;
-}
-.table .action-link:last-child {
-    margin-right: 0;
 }
 .table .action-link:hover {
     background: #e9ecef;
