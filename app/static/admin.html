@@ -168,47 +168,45 @@
             <div class="form-section">
                 <div class="mb-3">
                     <label class="form-label">考试名称</label>
-                    <input type="text" class="form-control form-control-lg" id="editExamName" placeholder="如：2026年上半年四六级考试">
+                    <input type="text" class="form-control form-control" id="editExamName" placeholder="如：2026年上半年四六级考试">
                 </div>
                 <div class="mb-3">
                     <label class="form-label">招募人数</label>
-                    <input type="number" class="form-control form-control-lg" id="editNeedNum" min="1" placeholder="请输入人数">
+                    <input type="number" class="form-control form-control" id="editNeedNum" min="1" placeholder="请输入人数">
                 </div>
                 <div class="mb-3">
                     <label class="form-label">截止时间</label>
-                    <input type="text" class="form-control form-control-lg" id="editEndTime" placeholder="点击选择日期和时间">
+                    <input type="text" class="form-control form-control" id="editEndTime" placeholder="点击选择日期和时间">
                     <div class="form-text mt-2">留空表示不限制截止时间</div>
                 </div>
                 <div class="mb-0">
                     <label class="form-label">QQ加群链接 <span class="text-muted fw-normal">（可选）</span></label>
-                    <input type="url" class="form-control form-control-lg" id="editQqGroup" placeholder="从QQ群管理复制加群链接，粘贴到此处">
+                    <input type="url" class="form-control form-control" id="editQqGroup" placeholder="从QQ群管理复制加群链接，粘贴到此处">
                     <div class="form-text mt-2">留空不修改</div>
                 </div>
             </div>
 
             <div class="d-grid gap-2 mt-4" style="position: sticky; bottom: 0; background: #fff; padding-top: 1rem;">
-                <button class="btn btn-primary btn-lg" id="editConfirmBtn">
+                <button class="btn btn-primary" id="editConfirmBtn">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -3px; margin-right: 4px">
                         <polyline points="20 6 9 17 4 12"/>
                     </svg>
                     保存修改
                 </button>
-                <button class="btn btn-outline-secondary btn-lg" data-bs-dismiss="offcanvas">取消</button>
+                <button class="btn btn-outline-secondary" data-bs-dismiss="offcanvas">取消</button>
             </div>
         </div>
     </div>
 
-    <header class="header text-center">
-        <div class="container">
-            <h1 class="mb-2">考务招募管理后台</h1>
+    <header class="header">
+        <div class="container d-flex justify-content-between align-items-center">
+            <h1 class="mb-0">考务招募管理后台</h1>
+            <button class="btn btn-outline-light btn-sm px-3" onclick="logout()">退出登录</button>
         </div>
     </header>
 
     <div class="content-wrapper">
         <div class="container mt-5 mb-5">
-            <div class="d-flex justify-content-end mb-4">
-                <button class="btn btn-danger" onclick="logout()">退出登录</button>
-            </div>
 
             <!-- 发布新招募 -->
         <div class="card p-5 mb-4">
@@ -222,21 +220,21 @@
                 <div class="row g-4">
                     <div class="col-md-5">
                         <label class="form-label">考试名称</label>
-                        <input type="text" name="exam_name" class="form-control form-control-lg" required placeholder="如：2026年上半年四六级考试">
+                        <input type="text" name="exam_name" class="form-control form-control" required placeholder="如：2026年上半年四六级考试">
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">招募人数</label>
-                        <input type="number" name="need_num" class="form-control form-control-lg" min="1" required placeholder="请输入人数">
+                        <input type="number" name="need_num" class="form-control form-control" min="1" required placeholder="请输入人数">
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">截止时间 <span class="text-muted fw-normal">（可选）</span></label>
-                        <input type="text" class="form-control form-control-lg" id="publishEndTime" placeholder="点击选择截止时间">
+                        <input type="text" class="form-control form-control" id="publishEndTime" placeholder="点击选择截止时间">
                     </div>
                 </div>
                 <div class="row g-4 mt-2">
                     <div class="col-md-6">
                         <label class="form-label">QQ加群链接 <span class="text-muted fw-normal">（可选）</span></label>
-                        <input type="url" name="qq_group" class="form-control form-control-lg" placeholder="从QQ群管理复制加群链接，粘贴到此处">
+                        <input type="url" name="qq_group" class="form-control form-control" placeholder="从QQ群管理复制加群链接，粘贴到此处">
                         <div class="form-text">在QQ群 → 群管理 → 加群设置中生成加群链接（如 https://qm.qq.com/q/xxxxx）</div>
                     </div>
                 </div>
