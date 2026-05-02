@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, Request, Form, HTTPException, Depends, BackgroundTasks, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
@@ -693,3 +693,180 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
     }
 
     return StreamingResponse(output, headers=headers, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# ==================== 考场基础数据 API ====================
+
+@app.post("/api/classrooms/import")
+async def import_classrooms(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    check_admin_login(request)
+    check_csrf(request)
+
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(400, "请上传 .xlsx 或 .xls 文件")
+
+    try:
+        import pandas as pd
+        contents = await file.read()
+        df = pd.read_excel(BytesIO(contents))
+
+        # 校验必要列
+        required_cols = {'教学楼', '教室名称', '是否固定桌椅', '是否具备双考场条件'}
+        if not required_cols.issubset(df.columns):
+            raise HTTPException(400, f"Excel 缺少必要列：{required_cols}")
+
+        imported = 0
+        errors = []
+
+        for idx, row in df.iterrows():
+            building_name = str(row['教学楼']).strip()
+            classroom_name = str(row['教室名称']).strip()
+            is_fixed = str(row['是否固定桌椅']).strip() in ('是', '1', 'true', 'True')
+            can_double = str(row['是否具备双考场条件']).strip() in ('是', '1', 'true', 'True')
+
+            if not classroom_name:
+                errors.append(f"第{idx+2}行：教室名称为空")
+                continue
+
+            # 查找或创建教学楼
+            building = db.query(Building).filter(Building.name == building_name).first()
+            if not building:
+                building = Building(name=building_name)
+                db.add(building)
+                db.flush()
+
+            # 检查重复
+            existing = db.query(Classroom).filter(
+                Classroom.building_id == building.id,
+                Classroom.name == classroom_name
+            ).first()
+            if existing:
+                existing.is_fixed_seats = is_fixed
+                existing.can_double_exam = can_double
+            else:
+                classroom = Classroom(
+                    building_id=building.id,
+                    name=classroom_name,
+                    is_fixed_seats=is_fixed,
+                    can_double_exam=can_double
+                )
+                db.add(classroom)
+            imported += 1
+
+        db.commit()
+        return {"code": 0, "msg": f"成功导入/更新 {imported} 条记录", "errors": errors}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"导入失败：{str(e)}")
+
+
+@app.get("/api/buildings")
+async def get_buildings(db: Session = Depends(get_db)):
+    """获取所有教学楼"""
+    buildings = db.query(Building).order_by(Building.id).all()
+    return [{"id": b.id, "name": b.name} for b in buildings]
+
+
+@app.get("/api/classrooms")
+async def get_classrooms(building_id: int = None, db: Session = Depends(get_db)):
+    """获取教室列表，可按教学楼筛选"""
+    query = db.query(Classroom)
+    if building_id:
+        query = query.filter(Classroom.building_id == building_id)
+    classrooms = query.order_by(Classroom.building_id, Classroom.name).all()
+
+    # 批量获取 building 名称
+    building_ids = {c.building_id for c in classrooms}
+    building_map = {}
+    if building_ids:
+        for b in db.query(Building).filter(Building.id.in_(building_ids)).all():
+            building_map[b.id] = b.name
+
+    result = []
+    for c in classrooms:
+        zone = detect_zone(c.name)
+        result.append({
+            "id": c.id,
+            "building_id": c.building_id,
+            "building_name": building_map.get(c.building_id, ""),
+            "name": c.name,
+            "zone": zone,
+            "is_fixed_seats": c.is_fixed_seats,
+            "can_double_exam": c.can_double_exam,
+        })
+    return result
+
+
+@app.post("/api/classrooms")
+async def create_classroom(
+    request: Request,
+    building_id: int = Form(...),
+    name: str = Form(...),
+    is_fixed_seats: bool = Form(False),
+    can_double_exam: bool = Form(False),
+    db: Session = Depends(get_db)
+):
+    check_admin_login(request)
+    check_csrf(request)
+
+    building = db.query(Building).filter(Building.id == building_id).first()
+    if not building:
+        raise HTTPException(400, "教学楼不存在")
+
+    exists = db.query(Classroom).filter(
+        Classroom.building_id == building_id,
+        Classroom.name == name
+    ).first()
+    if exists:
+        raise HTTPException(400, f"教室 {name} 已存在")
+
+    classroom = Classroom(
+        building_id=building_id,
+        name=name,
+        is_fixed_seats=is_fixed_seats,
+        can_double_exam=can_double_exam
+    )
+    db.add(classroom)
+    db.commit()
+    db.refresh(classroom)
+    return {"code": 0, "msg": "添加成功", "id": classroom.id}
+
+
+@app.put("/api/classrooms/{classroom_id}")
+async def update_classroom(
+    request: Request,
+    classroom_id: int,
+    is_fixed_seats: bool = Form(...),
+    can_double_exam: bool = Form(...),
+    db: Session = Depends(get_db)
+):
+    check_admin_login(request)
+    check_csrf(request)
+
+    classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
+    if not classroom:
+        raise HTTPException(404, "教室不存在")
+
+    classroom.is_fixed_seats = is_fixed_seats
+    classroom.can_double_exam = can_double_exam
+    db.commit()
+    return {"code": 0, "msg": "修改成功"}
+
+
+@app.delete("/api/classrooms/{classroom_id}")
+async def delete_classroom(
+    request: Request,
+    classroom_id: int,
+    db: Session = Depends(get_db)
+):
+    check_admin_login(request)
+    check_csrf(request)
+
+    classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
+    if not classroom:
+        raise HTTPException(404, "教室不存在")
+
+    db.delete(classroom)
+    db.commit()
+    return {"code": 0, "msg": "删除成功"}
