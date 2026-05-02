@@ -176,6 +176,21 @@ class Classroom(Base):
     can_double_exam = Column(Boolean, default=False)  # True=具备双考场条件
     __table_args__ = (UniqueConstraint('building_id', 'name', name='uq_building_classroom'),)
 
+
+
+class AcceptanceRecord(Base):
+    """验收记录"""
+    __tablename__ = "acceptance_records"
+    id = Column(Integer, primary_key=True)
+    recruitment_classroom_id = Column(Integer, nullable=False)
+    status = Column(String(20), default="pending")    # pending/rejected/passed/sealed
+    reviewer_type = Column(String(20), nullable=True)
+    reviewer_id = Column(Integer, nullable=True)
+    note = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=now_beijing)
+    updated_at = Column(DateTime, default=now_beijing, onupdate=now_beijing)
+
+
 Base.metadata.create_all(bind=engine)
 
 def get_db():
@@ -331,6 +346,23 @@ def init_task_progress(recruit_id: int, db: Session):
     db.commit()
 
 
+def init_acceptance_records(recruit_id: int, db: Session):
+    """初始化验收记录（为所有已分组的考场创建）"""
+    rcs = db.query(RecruitmentClassroom).filter(
+        RecruitmentClassroom.recruitment_id == recruit_id
+    ).all()
+    for rc in rcs:
+        existing = db.query(AcceptanceRecord).filter(
+            AcceptanceRecord.recruitment_classroom_id == rc.id
+        ).first()
+        if not existing:
+            db.add(AcceptanceRecord(
+                recruitment_classroom_id=rc.id,
+                status="pending",
+            ))
+    db.commit()
+
+
 def auto_assign_groups(recruit_id: int, db: Session) -> list[dict]:
     """自动分组算法"""
     from collections import defaultdict
@@ -473,6 +505,7 @@ def save_groups_to_db(recruit_id: int, db: Session) -> dict:
 
     db.commit()
     init_task_progress(recruit_id, db)
+    init_acceptance_records(recruit_id, db)
     return {"code": 0, "msg": "分组保存成功"}
 
 
@@ -1510,6 +1543,249 @@ async def get_task_progress(request: Request, recruit_id: int, db: Session = Dep
                 "progress": f"{completed}/{total}",
                 "percent": int(completed / total * 100) if total > 0 else 0,
                 "all_done": completed >= total,
+            })
+
+    return {"code": 0, "data": result}
+
+
+@app.post("/api/recruit/{recruit_id}/classrooms/{rc_id}/submit-review")
+async def submit_for_review(
+    request: Request,
+    recruit_id: int,
+    rc_id: int,
+    db: Session = Depends(get_db)
+):
+    """小组提交验收（需学号+手机验证）"""
+    import json
+    body = await request.json()
+    student_id = body.get("student_id", "")
+    phone = body.get("phone", "")
+
+    if not (student_id.isdigit() and len(student_id) == 8):
+        raise HTTPException(400, "学号格式错误")
+    if not (phone.isdigit() and len(phone) == 11):
+        raise HTTPException(400, "手机号格式错误")
+
+    reg = db.query(Registration).filter(
+        Registration.student_id == student_id,
+        Registration.phone == phone,
+        Registration.recruitment_id == recruit_id
+    ).first()
+    if not reg:
+        raise HTTPException(404, "未找到报名记录")
+
+    rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == rc_id).first()
+    if not rc:
+        raise HTTPException(404, "考场不存在")
+
+    assign = db.query(RecruitmentGroupClassroom).join(
+        RecruitmentGroup, RecruitmentGroupClassroom.group_id == RecruitmentGroup.id
+    ).filter(
+        RecruitmentGroupClassroom.recruitment_classroom_id == rc_id,
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).first()
+    if not assign:
+        raise HTTPException(403, "你没有此考场的权限")
+
+    member = db.query(RecruitmentGroupMember).filter(
+        RecruitmentGroupMember.group_id == assign.group_id,
+        RecruitmentGroupMember.registration_id == reg.id
+    ).first()
+    if not member:
+        raise HTTPException(403, "你不是该考场所在组的成员")
+
+    tasks = db.query(TaskProgress).filter(
+        TaskProgress.recruitment_classroom_id == rc_id,
+        TaskProgress.task_type == "setup"
+    ).all()
+    completed = sum(1 for t in tasks if t.is_completed)
+    total = sum(1 for t in tasks if not t.is_auto_skip)
+    if completed < total:
+        raise HTTPException(400, f"还有 {total - completed} 项任务未完成")
+
+    record = db.query(AcceptanceRecord).filter(
+        AcceptanceRecord.recruitment_classroom_id == rc_id
+    ).first()
+    if not record:
+        record = AcceptanceRecord(recruitment_classroom_id=rc_id)
+        db.add(record)
+
+    if record.status == "passed":
+        raise HTTPException(400, "该考场已验收通过")
+
+    record.status = "pending"
+    record.note = None
+    db.commit()
+    return {"code": 0, "msg": "已提交验收"}
+
+
+@app.get("/api/recruit/{recruit_id}/acceptance/supervisor")
+async def supervisor_acceptance_panel(
+    request: Request,
+    recruit_id: int,
+    student_id: str = "",
+    phone: str = "",
+    db: Session = Depends(get_db)
+):
+    """楼栋负责人查看自己楼栋的验收面板"""
+    if not (student_id.isdigit() and len(student_id) == 8):
+        raise HTTPException(400, "学号格式错误")
+    if not (phone.isdigit() and len(phone) == 11):
+        raise HTTPException(400, "手机号格式错误")
+
+    reg = db.query(Registration).filter(
+        Registration.student_id == student_id,
+        Registration.phone == phone,
+        Registration.recruitment_id == recruit_id
+    ).first()
+    if not reg:
+        raise HTTPException(404, "未找到报名记录")
+
+    group = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.recruitment_id == recruit_id,
+        RecruitmentGroup.is_supervisor == True
+    ).join(
+        RecruitmentGroupMember,
+        RecruitmentGroupMember.group_id == RecruitmentGroup.id
+    ).filter(
+        RecruitmentGroupMember.registration_id == reg.id
+    ).first()
+
+    if not group:
+        raise HTTPException(403, "你不是楼栋负责人")
+
+    zone_groups = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.recruitment_id == recruit_id,
+        RecruitmentGroup.zone_name == group.zone_name
+    ).all()
+
+    zone_group_ids = [g.id for g in zone_groups]
+    assigns = db.query(RecruitmentGroupClassroom).filter(
+        RecruitmentGroupClassroom.group_id.in_(zone_group_ids)
+    ).all()
+
+    result = []
+    for assign in assigns:
+        rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
+        if not rc:
+            continue
+        cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+        if not cr:
+            continue
+
+        record = db.query(AcceptanceRecord).filter(
+            AcceptanceRecord.recruitment_classroom_id == rc.id
+        ).first()
+
+        members = db.query(Registration).join(
+            RecruitmentGroupMember,
+            RecruitmentGroupMember.registration_id == Registration.id
+        ).filter(RecruitmentGroupMember.group_id == assign.group_id).all()
+
+        result.append({
+            "rc_id": rc.id,
+            "classroom_name": cr.name,
+            "group_members": [{"name": m.name, "gender": m.gender} for m in members],
+            "status": record.status if record else "pending",
+            "note": record.note if record else "",
+        })
+
+    return {"code": 0, "data": result, "zone_name": group.zone_name}
+
+
+@app.post("/api/acceptance/{rc_id}/review")
+async def review_classroom(
+    request: Request,
+    rc_id: int,
+    db: Session = Depends(get_db)
+):
+    """楼栋负责人/管理员验收或驳回"""
+    import json
+    body = await request.json()
+    action = body.get("action", "")
+    note = body.get("note", "")
+
+    if action not in ("pass", "reject"):
+        raise HTTPException(400, "操作无效")
+    if action == "reject" and not note.strip():
+        raise HTTPException(400, "驳回必须填写原因")
+
+    record = db.query(AcceptanceRecord).filter(
+        AcceptanceRecord.recruitment_classroom_id == rc_id
+    ).first()
+    if not record:
+        raise HTTPException(404, "验收记录不存在")
+    if record.status == "sealed":
+        raise HTTPException(400, "已封门，不可操作")
+
+    record.status = "rejected" if action == "reject" else "passed"
+    record.note = note.strip() if note.strip() else None
+    db.commit()
+    return {"code": 0, "msg": "操作成功"}
+
+
+@app.post("/api/recruit/{recruit_id}/acceptance/seal")
+async def seal_all(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    """总负责人确认封门"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    records = db.query(AcceptanceRecord).join(
+        RecruitmentClassroom,
+        AcceptanceRecord.recruitment_classroom_id == RecruitmentClassroom.id
+    ).filter(
+        RecruitmentClassroom.recruitment_id == recruit_id
+    ).all()
+
+    not_passed = [r for r in records if r.status != "passed" and r.status != "sealed"]
+    if not_passed:
+        raise HTTPException(400, f"还有 {len(not_passed)} 间教室未通过验收")
+
+    for r in records:
+        r.status = "sealed"
+
+    db.commit()
+    return {"code": 0, "msg": "全部封门完成"}
+
+
+@app.get("/api/recruit/{recruit_id}/acceptance/overview")
+async def acceptance_overview(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    """管理员查看验收总览"""
+    check_admin_login(request)
+
+    groups = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).all()
+
+    result = []
+    for g in groups:
+        assigns = db.query(RecruitmentGroupClassroom).filter(
+            RecruitmentGroupClassroom.group_id == g.id
+        ).all()
+
+        for assign in assigns:
+            rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
+            if not rc:
+                continue
+            cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+            if not cr:
+                continue
+
+            record = db.query(AcceptanceRecord).filter(
+                AcceptanceRecord.recruitment_classroom_id == rc.id
+            ).first()
+
+            members = db.query(Registration).join(
+                RecruitmentGroupMember,
+                RecruitmentGroupMember.registration_id == Registration.id
+            ).filter(RecruitmentGroupMember.group_id == g.id).all()
+
+            result.append({
+                "classroom_name": cr.name,
+                "zone_name": g.zone_name or "无分区",
+                "members": [m.name for m in members],
+                "status": record.status if record else "pending",
+                "note": record.note if record else "",
             })
 
     return {"code": 0, "data": result}
