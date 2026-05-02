@@ -752,6 +752,7 @@
                 });
             } catch (err) {
                 console.error('加载教学楼失败', err);
+                showToast('加载教学楼失败', 'danger');
             }
         }
 
@@ -772,30 +773,78 @@
 
                 container.innerHTML = '';
                 for (const [bname, building] of Object.entries(groups)) {
-                    const buildingCard = document.createElement('div');
-                    buildingCard.className = 'mb-4';
-                    let html = `<h5 class="mb-2">🏫 ${bname}</h5>`;
+                    const buildingDiv = document.createElement('div');
+                    buildingDiv.className = 'mb-4';
+
+                    const title = document.createElement('h5');
+                    title.className = 'mb-2';
+                    title.textContent = '🏫 ' + bname;
+                    buildingDiv.appendChild(title);
+
                     for (const [zone, classrooms] of Object.entries(building.zones)) {
-                        html += `<div class="ms-3 mb-2"><span class="text-muted small">${zone}</span>`;
-                        html += `<div class="d-flex flex-wrap gap-2 mt-1">`;
+                        const zoneDiv = document.createElement('div');
+                        zoneDiv.className = 'ms-3 mb-2';
+
+                        const zoneLabel = document.createElement('span');
+                        zoneLabel.className = 'text-muted small';
+                        zoneLabel.textContent = zone;
+                        zoneDiv.appendChild(zoneLabel);
+
+                        const flexContainer = document.createElement('div');
+                        flexContainer.className = 'd-flex flex-wrap gap-2 mt-1';
+
                         classrooms.forEach(c => {
-                            const seatIcon = c.is_fixed_seats ? '🪑' : '📦';
-                            const seatLabel = c.is_fixed_seats ? '固定' : '活动';
-                            const doubleLabel = c.can_double_exam ? '可双考场' : '仅单考场';
-                            html += `<div class="border rounded p-2" style="min-width:120px;background:#f8f9fa">
-                                <div><strong>${c.name}</strong></div>
-                                <div class="small text-muted">${seatIcon} ${seatLabel}</div>
-                                <div class="small text-muted">${doubleLabel}</div>
-                                <div class="mt-1">
-                                    <a href="#" class="small me-2 classroom-edit" data-id="${c.id}" data-building-id="${c.building_id}" data-name="${c.name}" data-fixed="${c.is_fixed_seats}" data-double="${c.can_double_exam}">编辑</a>
-                                    <a href="#" class="small text-danger classroom-delete" data-id="${c.id}" data-name="${c.name}">删除</a>
-                                </div>
-                            </div>`;
+                            const card = document.createElement('div');
+                            card.className = 'border rounded p-2';
+                            card.style.cssText = 'min-width:120px;background:#f8f9fa';
+
+                            const nameEl = document.createElement('div');
+                            const strong = document.createElement('strong');
+                            strong.textContent = c.name;
+                            nameEl.appendChild(strong);
+                            card.appendChild(nameEl);
+
+                            const typeEl = document.createElement('div');
+                            typeEl.className = 'small text-muted';
+                            typeEl.textContent = (c.is_fixed_seats ? '🪑 固定' : '📦 活动');
+                            card.appendChild(typeEl);
+
+                            const doubleEl = document.createElement('div');
+                            doubleEl.className = 'small text-muted';
+                            doubleEl.textContent = c.can_double_exam ? '可双考场' : '仅单考场';
+                            card.appendChild(doubleEl);
+
+                            const actions = document.createElement('div');
+                            actions.className = 'mt-1';
+
+                            const editLink = document.createElement('a');
+                            editLink.href = '#';
+                            editLink.className = 'small me-2 classroom-edit';
+                            editLink.textContent = '编辑';
+                            editLink.dataset.id = c.id;
+                            editLink.dataset.buildingId = c.building_id;
+                            editLink.dataset.name = c.name;
+                            editLink.dataset.fixed = c.is_fixed_seats;
+                            editLink.dataset.double = c.can_double_exam;
+                            actions.appendChild(editLink);
+
+                            const delLink = document.createElement('a');
+                            delLink.href = '#';
+                            delLink.className = 'small text-danger classroom-delete';
+                            delLink.textContent = '删除';
+                            delLink.dataset.id = c.id;
+                            delLink.dataset.name = c.name;
+                            actions.appendChild(delLink);
+
+                            card.appendChild(actions);
+                            flexContainer.appendChild(card);
                         });
-                        html += `</div></div>`;
+
+                        zoneDiv.appendChild(flexContainer);
+                        buildingDiv.appendChild(zoneDiv);
                     }
-                    buildingCard.innerHTML = html;
-                    container.appendChild(buildingCard);
+
+                    container.appendChild(buildingDiv);
                 }
 
                 // 绑定事件（使用事件委托）
@@ -805,7 +854,7 @@
                         classroomEditId = parseInt(this.dataset.id);
                         document.getElementById('classroomModalTitle').textContent = '编辑教室';
                         document.getElementById('formClassName').value = this.dataset.name;
-                        document.getElementById('formClassName').disabled = true;
+                        document.getElementById('formClassName').disabled = false;
                         document.getElementById('formFixedSeats').checked = this.dataset.fixed === 'true';
                         document.getElementById('formCanDouble').checked = this.dataset.double === 'true';
                         loadBuildingSelect('formBuildingId', this.dataset.buildingId);
@@ -831,6 +880,7 @@
                 });
             } catch (err) {
                 console.error('加载教室列表失败', err);
+                showToast('加载教室列表失败', 'danger');
             }
         }
 
@@ -895,8 +945,9 @@
                 const url = classroomEditId ? `/api/classrooms/${classroomEditId}` : '/api/classrooms';
                 const method = classroomEditId ? 'PUT' : 'POST';
 
-                // For PUT, only send changeable fields
                 const body = new FormData();
+                body.append('name', document.getElementById('formClassName').value.trim());
+                body.append('building_id', document.getElementById('formBuildingId').value);
                 body.append('is_fixed_seats', document.getElementById('formFixedSeats').checked);
                 body.append('can_double_exam', document.getElementById('formCanDouble').checked);
 
