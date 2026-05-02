@@ -107,6 +107,13 @@
         </div>
     </div>
 
+    <!-- 楼栋负责人验收面板 -->
+    <div class="card p-4 mt-4" id="supervisorCard" style="display:none;">
+        <h3 class="mb-3">🏢 楼栋验收</h3>
+        <div class="text-muted small mb-2" id="supervisorZone"></div>
+        <div id="supervisorList"></div>
+    </div>
+
     <!-- 取消报名弹窗 -->
     <div class="modal fade" id="cancelModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
@@ -167,6 +174,13 @@
             toastBody.textContent = message;
             toastEl.className = 'toast align-items-center border-0 text-bg-' + (type || 'info');
             bootstrap.Toast.getOrCreateInstance(toastEl).show();
+        }
+
+        function showConfirm(title, message) {
+            return new Promise((resolve) => {
+                if (confirm(title + '\n\n' + message)) resolve(true);
+                else resolve(false);
+            });
         }
 
         // ========== QQ群跳转弹窗 ==========
@@ -362,6 +376,7 @@
                         div.textContent = "暂无报名记录";
                         container.appendChild(div);
                     } else {
+                        window.currentRecruitId = data.data[0].recruit_id;
                         const count = data.data.length;
                         const header = document.createElement("div");
                         header.className = "mb-3 fw-bold";
@@ -472,6 +487,7 @@
 
                     // 加载布置任务
                     loadMyTasks(document.getElementById("myStudentId").value, document.getElementById("myPhone").value);
+                    loadSupervisorPanel(document.getElementById("myStudentId").value, document.getElementById("myPhone").value);
 
                 }
             } catch (err) {
@@ -636,6 +652,17 @@
                         }
                     });
 
+                    // 提交验收按钮
+                    if (item.all_done) {
+                        html += `<div class="mt-2">
+                            <button class="btn btn-sm btn-outline-primary submit-review-btn"
+                                data-rc-id="${item.rc_id}"
+                                data-classroom="${item.classroom_name}">
+                                📋 提交验收
+                            </button>
+                        </div>`;
+                    }
+
                     html += `</div></div>`;
                 });
 
@@ -660,8 +687,139 @@
                         }
                     });
                 });
+
+                // 绑定提交验收按钮事件
+                container.querySelectorAll('.submit-review-btn').forEach(btn => {
+                    btn.addEventListener('click', async function() {
+                        const rcId = this.dataset.rcId;
+                        const classroomName = this.dataset.classroom;
+                        if (!window.confirm(`确定将「${classroomName}」提交验收吗？`)) return;
+                        const recruitId = window.currentRecruitId;
+                        if (!recruitId) { showToast('无法获取招募信息', 'danger'); return; }
+                        try {
+                            const res = await fetch(`/api/recruit/${recruitId}/classrooms/${rcId}/submit-review`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    student_id: document.getElementById("myStudentId").value,
+                                    phone: document.getElementById("myPhone").value
+                                })
+                            });
+                            const data = await res.json();
+                            showToast(data.msg || data.detail, data.code === 0 ? 'success' : 'danger');
+                        } catch (err) {
+                            showToast('提交失败', 'danger');
+                        }
+                    });
+                });
             } catch (err) {
                 card.style.display = 'none';
+            }
+        }
+
+        // ========== 楼栋负责人验收 ==========
+
+        async function loadSupervisorPanel(studentId, phone) {
+            const card = document.getElementById('supervisorCard');
+            const list = document.getElementById('supervisorList');
+            const zoneLabel = document.getElementById('supervisorZone');
+
+            try {
+                const res = await fetch('/api/my-registrations', {
+                    method: 'POST',
+                    body: new URLSearchParams({ student_id: studentId, phone: phone })
+                });
+                const regData = await res.json();
+                if (regData.code !== 0 || !regData.data || regData.data.length === 0) {
+                    card.style.display = 'none'; return;
+                }
+
+                for (const reg of regData.data) {
+                    try {
+                        const sres = await fetch(`/api/recruit/${reg.recruit_id}/acceptance/supervisor?student_id=${studentId}&phone=${phone}`);
+                        if (!sres.ok) continue;
+                        const data = await sres.json();
+                        if (data.code === 0 && data.data && data.data.length > 0) {
+                            card.style.display = 'block';
+                            zoneLabel.textContent = `🏢 ${data.zone_name}`;
+
+                            let html = '<div class="row g-2">';
+                            data.data.forEach(item => {
+                                const statusMap = {
+                                    'pending': '⏳ 待验收',
+                                    'rejected': '❌ 已驳回',
+                                    'passed': '✅ 已通过',
+                                    'sealed': '🔒 已封门',
+                                };
+                                const st = statusMap[item.status] || '⏳ 待验收';
+                                const sc = item.status === 'passed' || item.status === 'sealed' ? 'success' :
+                                           item.status === 'rejected' ? 'danger' : 'warning';
+
+                                html += `<div class="col-md-6 mb-2"><div class="border rounded p-3">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <strong>🏫 ${item.classroom_name}</strong>
+                                        <span class="badge bg-${sc}">${st}</span>
+                                    </div>
+                                    <div class="small text-muted">👤 ${item.group_members.map(m => m.name).join('、')}</div>`;
+
+                                if (item.status === 'pending') {
+                                    html += `<div class="mt-2">
+                                        <button class="btn btn-sm btn-success me-1 review-pass" data-rc-id="${item.rc_id}">通过</button>
+                                        <button class="btn btn-sm btn-danger review-reject" data-rc-id="${item.rc_id}">驳回</button>
+                                        <input type="text" class="form-control form-control-sm mt-1 reject-note" placeholder="驳回原因" style="display:none;">
+                                    </div>`;
+                                } else if (item.status === 'rejected') {
+                                    html += `<div class="small text-danger mt-1">原因：${item.note || '未填写'}</div>`;
+                                } else if (item.status === 'passed') {
+                                    html += `<div class="small text-success mt-1">✅ 等待总负责人封门</div>`;
+                                }
+
+                                html += `</div></div>`;
+                            });
+                            html += '</div>';
+                            list.innerHTML = html;
+
+                            // 绑定通过按钮
+                            list.querySelectorAll('.review-pass').forEach(btn => {
+                                btn.addEventListener('click', async function() {
+                                    await doReview(this.dataset.rcId, 'pass', '', studentId, phone);
+                                });
+                            });
+                            // 绑定驳回按钮
+                            list.querySelectorAll('.review-reject').forEach(btn => {
+                                btn.addEventListener('click', async function() {
+                                    const noteInput = this.parentElement.querySelector('.reject-note');
+                                    noteInput.style.display = 'block';
+                                    noteInput.focus();
+                                    noteInput.onchange = async function() {
+                                        if (this.value.trim()) {
+                                            await doReview(btn.dataset.rcId, 'reject', this.value.trim(), studentId, phone);
+                                        }
+                                    };
+                                });
+                            });
+
+                            break;
+                        }
+                    } catch (_) { continue; }
+                }
+            } catch (_) {
+                card.style.display = 'none';
+            }
+        }
+
+        async function doReview(rcId, action, note, studentId, phone) {
+            try {
+                const res = await fetch('/api/acceptance/' + rcId + '/review', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, note, student_id: studentId, phone })
+                });
+                const data = await res.json();
+                showToast(data.msg || data.detail, data.code === 0 ? 'success' : 'danger');
+                if (data.code === 0) loadSupervisorPanel(studentId, phone);
+            } catch (err) {
+                showToast('操作失败', 'danger');
             }
         }
     </script>
