@@ -120,6 +120,20 @@ class RecruitmentGroupClassroom(Base):
     recruitment_classroom_id = Column(Integer, nullable=False)
 
 
+class TaskProgress(Base):
+    """布置/恢复任务进度记录"""
+    __tablename__ = "task_progress"
+    id = Column(Integer, primary_key=True)
+    recruitment_classroom_id = Column(Integer, nullable=False)
+    item_key = Column(String(50), nullable=False)
+    item_name = Column(String(100), nullable=False)
+    is_completed = Column(Boolean, default=False)
+    is_auto_skip = Column(Boolean, default=False)
+    completed_by = Column(Integer, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    task_type = Column(String(20), default="setup")  # "setup" or "recovery"
+
+
 class Registration(Base):
     __tablename__ = "registration"
     id = Column(Integer, primary_key=True)
@@ -269,6 +283,54 @@ def serialize_recruit_classrooms(recruit_id: int, db: Session) -> list[dict]:
     return result
 
 
+# 标准布置清单（8项）
+STANDARD_SETUP_ITEMS = [
+    ("door_post", "张贴门帖（核对门牌号）", False),
+    ("forbidden_items", "设置禁带物品放置处", False),
+    ("count_desks", "清点桌椅数量/补齐缺额", True),
+    ("clean_room", "教室环境清理（黑板/窗帘/课桌）", False),
+    ("check_clock", "核对时钟", False),
+    ("check_broadcast", "检查广播声音（听够3分钟）", False),
+    ("seat_labels", "张贴座位号", False),
+    ("self_check", "自查（对照标准逐项确认）", False),
+]
+
+
+def init_task_progress(recruit_id: int, db: Session):
+    """为已分组的教室创建布置清单进度记录"""
+    rcs = db.query(RecruitmentClassroom).filter(
+        RecruitmentClassroom.recruitment_id == recruit_id
+    ).all()
+    if not rcs:
+        return
+
+    rc_ids = [rc.id for rc in rcs]
+    db.query(TaskProgress).filter(
+        TaskProgress.recruitment_classroom_id.in_(rc_ids),
+        TaskProgress.task_type == "setup"
+    ).delete(synchronize_session=False)
+
+    cr_map = {}
+    classroom_ids = [rc.classroom_id for rc in rcs]
+    for cr in db.query(Classroom).filter(Classroom.id.in_(classroom_ids)).all():
+        cr_map[cr.id] = cr.is_fixed_seats
+
+    for rc in rcs:
+        is_fixed = cr_map.get(rc.classroom_id, False)
+        for item_key, item_name, skip_for_fixed in STANDARD_SETUP_ITEMS:
+            tp = TaskProgress(
+                recruitment_classroom_id=rc.id,
+                item_key=item_key,
+                item_name=item_name,
+                is_auto_skip=(skip_for_fixed and is_fixed),
+                is_completed=(skip_for_fixed and is_fixed),
+                task_type="setup",
+            )
+            db.add(tp)
+
+    db.commit()
+
+
 def auto_assign_groups(recruit_id: int, db: Session) -> list[dict]:
     """自动分组算法"""
     from collections import defaultdict
@@ -410,6 +472,7 @@ def save_groups_to_db(recruit_id: int, db: Session) -> dict:
                 classroom_idx += 1
 
     db.commit()
+    init_task_progress(recruit_id, db)
     return {"code": 0, "msg": "分组保存成功"}
 
 
@@ -1306,3 +1369,147 @@ async def save_groups(request: Request, recruit_id: int, db: Session = Depends(g
 
     db.commit()
     return {"code": 0, "msg": "分组保存成功"}
+
+
+@app.post("/api/recruit/{recruit_id}/init-tasks")
+async def init_tasks(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    """初始化布置清单任务（管理员手动触发）"""
+    check_admin_login(request)
+    check_csrf(request)
+    init_task_progress(recruit_id, db)
+    return {"code": 0, "msg": "任务初始化成功"}
+
+
+@app.post("/api/my-tasks")
+async def get_my_tasks(
+    student_id: str = Form(...),
+    phone: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """学生查看自己的布置任务"""
+    if not (student_id.isdigit() and len(student_id) == 8):
+        raise HTTPException(400, "学号格式错误")
+    if not (phone.isdigit() and len(phone) == 11):
+        raise HTTPException(400, "手机号格式错误")
+
+    reg = db.query(Registration).filter(
+        Registration.student_id == student_id,
+        Registration.phone == phone
+    ).first()
+    if not reg:
+        raise HTTPException(404, "未找到报名记录")
+
+    member = db.query(RecruitmentGroupMember).join(
+        RecruitmentGroup,
+        RecruitmentGroupMember.group_id == RecruitmentGroup.id
+    ).filter(
+        RecruitmentGroupMember.registration_id == reg.id,
+        RecruitmentGroup.recruitment_id == reg.recruitment_id
+    ).first()
+
+    if not member:
+        return {"code": 0, "data": [], "msg": "暂无分组任务"}
+
+    assignments = db.query(RecruitmentGroupClassroom).filter(
+        RecruitmentGroupClassroom.group_id == member.group_id
+    ).all()
+
+    group = db.query(RecruitmentGroup).filter(RecruitmentGroup.id == member.group_id).first()
+
+    result = []
+    for assign in assignments:
+        rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
+        if not rc:
+            continue
+        cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+        if not cr:
+            continue
+
+        tasks = db.query(TaskProgress).filter(
+            TaskProgress.recruitment_classroom_id == rc.id,
+            TaskProgress.task_type == "setup"
+        ).order_by(TaskProgress.id).all()
+
+        task_list = [{
+            "id": t.id,
+            "item_key": t.item_key,
+            "item_name": t.item_name,
+            "is_completed": t.is_completed,
+            "is_auto_skip": t.is_auto_skip,
+        } for t in tasks]
+
+        completed = sum(1 for t in tasks if t.is_completed)
+        total = sum(1 for t in tasks if not t.is_auto_skip)
+
+        result.append({
+            "rc_id": rc.id,
+            "classroom_name": cr.name,
+            "exam_numbers": [rc.exam_number_start, rc.exam_number_start + 1] if rc.exam_mode == "double" else [rc.exam_number_start],
+            "tasks": task_list,
+            "progress": f"{completed}/{total}",
+            "all_done": completed >= total,
+        })
+
+    return {"code": 0, "data": result, "zone_name": group.zone_name if group else ""}
+
+
+@app.post("/api/tasks/{task_id}/toggle")
+async def toggle_task(task_id: int, db: Session = Depends(get_db)):
+    """切换任务项的完成状态"""
+    task = db.query(TaskProgress).filter(TaskProgress.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    if task.is_auto_skip:
+        raise HTTPException(400, "自动跳过的任务不可操作")
+
+    task.is_completed = not task.is_completed
+    task.completed_at = now_beijing() if task.is_completed else None
+    db.commit()
+
+    return {"code": 0, "msg": "更新成功", "is_completed": task.is_completed}
+
+
+@app.get("/api/recruit/{recruit_id}/task-progress")
+async def get_task_progress(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    """管理员查看所有教室的进度"""
+    check_admin_login(request)
+
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    groups = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).all()
+
+    result = []
+    for g in groups:
+        assigns = db.query(RecruitmentGroupClassroom).filter(
+            RecruitmentGroupClassroom.group_id == g.id
+        ).all()
+
+        for assign in assigns:
+            rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
+            if not rc:
+                continue
+            cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+            if not cr:
+                continue
+
+            tasks = db.query(TaskProgress).filter(
+                TaskProgress.recruitment_classroom_id == rc.id,
+                TaskProgress.task_type == "setup"
+            ).all()
+
+            completed = sum(1 for t in tasks if t.is_completed)
+            total = sum(1 for t in tasks if not t.is_auto_skip)
+
+            result.append({
+                "classroom_name": cr.name,
+                "zone_name": g.zone_name or "无分区",
+                "progress": f"{completed}/{total}",
+                "percent": int(completed / total * 100) if total > 0 else 0,
+                "all_done": completed >= total,
+            })
+
+    return {"code": 0, "data": result}
