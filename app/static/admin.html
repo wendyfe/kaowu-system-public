@@ -1164,6 +1164,11 @@ async function loadPublishClassroomTree() {
         const container = document.getElementById('publishClassroomTree');
         container.innerHTML = '';
 
+        if (list.length === 0) {
+            container.innerHTML = '<div class="text-muted small py-2">暂无教室数据</div>';
+            return;
+        }
+
         // Group: building_name → zone → classrooms
         const buildings = {};
         list.forEach(c => {
@@ -1215,7 +1220,7 @@ async function loadPublishClassroomTree() {
 
                     const nameSpan = document.createElement('span');
                     nameSpan.className = 'small';
-                    nameSpan.textContent = c.name + (c.is_fixed_seats ? ' 🛏️' : '');
+                    nameSpan.textContent = c.name + (c.is_fixed_seats ? ' 🪑' : '');
 
                     const ms = document.createElement('select');
                     ms.className = 'form-select form-select-sm';
@@ -1318,6 +1323,11 @@ async function loadEditClassroomTree() {
         const list = await res.json();
         const container = document.getElementById('editClassroomTree');
         container.innerHTML = '';
+
+        if (list.length === 0) {
+            container.innerHTML = '<div class="text-muted small py-2">暂无教室数据</div>';
+            return;
+        }
 
         const buildings = {};
         list.forEach(c => {
