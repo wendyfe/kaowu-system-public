@@ -1432,6 +1432,294 @@ async def get_recruit_classrooms(recruit_id: int, db: Session = Depends(get_db))
     return serialize_recruit_classrooms(recruit_id, db)
 
 
+@app.get("/api/recruit/{recruit_id}/manual-grouping-data")
+async def get_manual_grouping_data(recruit_id: int, db: Session = Depends(get_db)):
+    """获取手动分组所需全部数据"""
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    registrations = db.query(Registration).filter(
+        Registration.recruitment_id == recruit_id
+    ).order_by(Registration.id).all()
+
+    reg_list = [{
+        "id": r.id, "student_id": r.student_id, "name": r.name,
+        "gender": r.gender, "has_experience": r.has_experience,
+    } for r in registrations]
+
+    general = recruit.general_supervisor_id
+
+    bs_list = db.query(BuildingSupervisor).filter(
+        BuildingSupervisor.recruitment_id == recruit_id
+    ).all()
+    supervisors = [{"id": bs.id, "zone_name": bs.zone_name, "registration_id": bs.registration_id} for bs in bs_list]
+
+    groups = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).all()
+
+    groups_data = []
+    for g in groups:
+        members = db.query(RecruitmentGroupMember).filter(
+            RecruitmentGroupMember.group_id == g.id
+        ).all()
+        member_ids = [m.registration_id for m in members]
+
+        classrooms = db.query(RecruitmentGroupClassroom).filter(
+            RecruitmentGroupClassroom.group_id == g.id
+        ).all()
+        rc_ids = [c.recruitment_classroom_id for c in classrooms]
+
+        groups_data.append({
+            "id": g.id,
+            "zone_name": g.zone_name,
+            "is_supervisor": g.is_supervisor,
+            "member_ids": member_ids,
+            "classroom_rc_ids": rc_ids,
+        })
+
+    rcs = db.query(RecruitmentClassroom).filter(
+        RecruitmentClassroom.recruitment_id == recruit_id
+    ).all()
+    classrooms_info = []
+    for rc in rcs:
+        cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+        if cr:
+            classrooms_info.append({
+                "rc_id": rc.id,
+                "classroom_id": rc.classroom_id,
+                "name": cr.name,
+                "zone": detect_zone(cr.name) or "未分区",
+                "exam_count": 2 if rc.exam_mode == "double" else 1,
+            })
+
+    return {
+        "recruit_id": recruit_id,
+        "general_supervisor_id": general,
+        "supervisors": supervisors,
+        "registrations": reg_list,
+        "groups": groups_data,
+        "classrooms": classrooms_info,
+    }
+
+
+@app.put("/api/recruit/{recruit_id}/general-supervisor")
+async def set_general_supervisor(
+    request: Request, recruit_id: int,
+    registration_id: int = Form(None),
+    db: Session = Depends(get_db)
+):
+    """设置或移除总负责人"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    if registration_id:
+        reg = db.query(Registration).filter(
+            Registration.id == registration_id,
+            Registration.recruitment_id == recruit_id
+        ).first()
+        if not reg:
+            raise HTTPException(400, "该报名记录不存在或不在此招募中")
+
+    recruit.general_supervisor_id = registration_id
+    db.commit()
+    return {"code": 0, "msg": "总负责人已设置" if registration_id else "总负责人已移除",
+            "general_supervisor_id": registration_id}
+
+
+@app.put("/api/recruit/{recruit_id}/building-supervisors")
+async def set_building_supervisors(
+    request: Request, recruit_id: int,
+    db: Session = Depends(get_db)
+):
+    """批量设置楼栋负责人"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    import json
+    body = await request.json()
+    supervisors = body.get("supervisors", [])
+
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    db.query(BuildingSupervisor).filter(
+        BuildingSupervisor.recruitment_id == recruit_id
+    ).delete()
+
+    for sv in supervisors:
+        zone = sv.get("zone_name", "").strip()
+        reg_id = sv.get("registration_id")
+        if zone and reg_id:
+            db.add(BuildingSupervisor(
+                recruitment_id=recruit_id,
+                zone_name=zone,
+                registration_id=reg_id,
+            ))
+
+    db.commit()
+    return {"code": 0, "msg": "楼栋负责人已保存"}
+
+
+@app.post("/api/recruit/{recruit_id}/groups")
+async def create_group(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    """创建新组"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    group = RecruitmentGroup(recruitment_id=recruit_id)
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+    return {"code": 0, "msg": "组已创建", "group_id": group.id}
+
+
+@app.delete("/api/recruit/{recruit_id}/groups/{group_id}")
+async def delete_group(request: Request, recruit_id: int, group_id: int, db: Session = Depends(get_db)):
+    """删除空组"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    group = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.id == group_id,
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).first()
+    if not group:
+        raise HTTPException(404, "组不存在")
+
+    members = db.query(RecruitmentGroupMember).filter(
+        RecruitmentGroupMember.group_id == group_id
+    ).count()
+    if members > 0:
+        raise HTTPException(400, "该组还有成员，请先移除所有成员再删除")
+
+    db.query(RecruitmentGroupClassroom).filter(
+        RecruitmentGroupClassroom.group_id == group_id
+    ).delete()
+    db.delete(group)
+    db.commit()
+    return {"code": 0, "msg": "组已删除"}
+
+
+@app.put("/api/recruit/{recruit_id}/groups/{group_id}/members")
+async def set_group_members(
+    request: Request, recruit_id: int, group_id: int,
+    db: Session = Depends(get_db)
+):
+    """设置组成员（全量替换）"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    import json
+    body = await request.json()
+    member_ids = body.get("member_ids", [])
+
+    group = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.id == group_id,
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).first()
+    if not group:
+        raise HTTPException(404, "组不存在")
+
+    db.query(RecruitmentGroupMember).filter(
+        RecruitmentGroupMember.group_id == group_id
+    ).delete()
+    db.flush()
+
+    for rid in member_ids:
+        reg = db.query(Registration).filter(
+            Registration.id == rid,
+            Registration.recruitment_id == recruit_id
+        ).first()
+        if reg:
+            db.add(RecruitmentGroupMember(group_id=group_id, registration_id=rid))
+
+    db.commit()
+    return {"code": 0, "msg": "组成员已更新"}
+
+
+@app.put("/api/recruit/{recruit_id}/groups/{group_id}/classrooms")
+async def set_group_classrooms(
+    request: Request, recruit_id: int, group_id: int,
+    db: Session = Depends(get_db)
+):
+    """设置组负责的教室（全量替换，互斥检查）"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    import json
+    body = await request.json()
+    rc_ids = body.get("rc_ids", [])
+
+    group = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.id == group_id,
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).first()
+    if not group:
+        raise HTTPException(404, "组不存在")
+
+    other_assigns = db.query(RecruitmentGroupClassroom).join(
+        RecruitmentGroup,
+        RecruitmentGroupClassroom.group_id == RecruitmentGroup.id
+    ).filter(
+        RecruitmentGroup.recruitment_id == recruit_id,
+        RecruitmentGroupClassroom.group_id != group_id,
+        RecruitmentGroupClassroom.recruitment_classroom_id.in_(rc_ids)
+    ).all()
+    if other_assigns:
+        taken_ids = [a.recruitment_classroom_id for a in other_assigns]
+        raise HTTPException(400, f"以下教室已被其他组占用：{taken_ids}")
+
+    db.query(RecruitmentGroupClassroom).filter(
+        RecruitmentGroupClassroom.group_id == group_id
+    ).delete()
+    db.flush()
+
+    for rcid in rc_ids:
+        rc = db.query(RecruitmentClassroom).filter(
+            RecruitmentClassroom.id == rcid,
+            RecruitmentClassroom.recruitment_id == recruit_id
+        ).first()
+        if rc:
+            db.add(RecruitmentGroupClassroom(group_id=group_id, recruitment_classroom_id=rcid))
+
+    db.commit()
+    return {"code": 0, "msg": "教室已分配"}
+
+
+@app.post("/api/recruit/{recruit_id}/finalize-grouping")
+async def finalize_grouping(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    """最终确认分组：初始化任务进度和验收记录"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    groups = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).count()
+    if groups == 0:
+        raise HTTPException(400, "还没有任何分组，请先创建分组")
+
+    all_groups = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).all()
+    for g in all_groups:
+        cnt = db.query(RecruitmentGroupMember).filter(
+            RecruitmentGroupMember.group_id == g.id
+        ).count()
+        if cnt == 0:
+            raise HTTPException(400, f"第{g.id}组没有成员，请先分配人员")
+
+    init_task_progress(recruit_id, db)
+    init_acceptance_records(recruit_id, db)
+    return {"code": 0, "msg": "分组已确认，任务清单和验收记录已创建"}
+
+
 @app.post("/api/recruit/{recruit_id}/auto-group")
 async def auto_group(request: Request, recruit_id: int, db: Session = Depends(get_db)):
     """自动分组并保存"""
