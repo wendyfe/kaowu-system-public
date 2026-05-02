@@ -1133,6 +1133,27 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
 
 # ==================== 考场基础数据 API ====================
 
+@app.get("/api/classrooms/template")
+async def download_classroom_template():
+    """下载教室导入模板（.xlsx）"""
+    df = pd.DataFrame({
+        "教学楼": ["树人楼", "树人楼", "综合楼"],
+        "教室名称": ["B101", "A201", "101"],
+        "是否固定桌椅": ["否", "否", "是"],
+        "是否具备双考场条件": ["是", "否", "是"],
+    })
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name="教室导入模板")
+    output.seek(0)
+
+    headers = {
+        "Content-Disposition": 'attachment; filename="classroom_import_template.xlsx"',
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+    return StreamingResponse(output, headers=headers, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 @app.post("/api/classrooms/import")
 async def import_classrooms(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
     check_admin_login(request)

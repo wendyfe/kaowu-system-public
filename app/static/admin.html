@@ -1141,14 +1141,10 @@
         // 下载模板
         document.getElementById('downloadTemplate')?.addEventListener('click', e => {
             e.preventDefault();
-            const csv = '﻿教学楼,教室名称,是否固定桌椅,是否具备双考场条件\n树人楼,B101,否,是\n树人楼,A201,否,否\n综合楼,101,是,是';
-            const blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
-            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url;
-            a.download = '教室导入模板.csv';
+            a.href = '/api/classrooms/template';
+            a.download = 'classroom_import_template.xlsx';
             a.click();
-            URL.revokeObjectURL(url);
         });
 
 // ========== 考场选择（发布 + 编辑） ==========
