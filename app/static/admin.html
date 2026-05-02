@@ -1251,9 +1251,19 @@ async function loadPublishClassroomTree() {
                             delete publishSelections[c.id];
                         }
                         updatePublishCount();
-                        // Uncheck zone if any child unchecked
-                        const zoneCb = this.closest('.ms-3').parentElement.querySelector('.zone-checkbox-publish');
-                        if (!this.checked && zoneCb) zoneCb.checked = false;
+                        // Update zone checkbox state
+                        const zoneContainer = this.closest('.mb-2');
+                        const zoneCb = zoneContainer.querySelector('.zone-checkbox-publish');
+                        if (zoneCb) {
+                            const allInZone = zoneContainer.querySelectorAll('.classroom-checkbox-publish');
+                            const checked = Array.from(allInZone).filter(s => s.checked);
+                            if (checked.length === 0) {
+                                zoneCb.checked = false;
+                            } else if (checked.length === allInZone.length) {
+                                zoneCb.checked = true;
+                            }
+                            // else leave as-is (checked or unchecked based on prior action)
+                        }
                     });
 
                     // Mode dropdown change
@@ -1263,14 +1273,6 @@ async function loadPublishClassroomTree() {
                             updatePublishCount();
                         }
                     });
-
-                    // Helper for zone batch selection
-                    cb._zoneChanged = function(mode) {
-                        cb.checked = true;
-                        ms.disabled = false;
-                        ms.value = mode;
-                        publishSelections[c.id] = mode;
-                    };
                 });
 
                 zDiv.appendChild(classDiv);
@@ -1279,12 +1281,16 @@ async function loadPublishClassroomTree() {
                 zCb.addEventListener('change', function() {
                     const childCbs = this.closest('.mb-2').querySelectorAll('.classroom-checkbox-publish');
                     childCbs.forEach(childCb => {
+                        const select = childCb.closest('.d-flex').querySelector('select');
                         if (this.checked) {
+                            childCb.checked = true;
+                            select.disabled = false;
                             const mode = childCb.dataset.canDouble === 'true' ? 'double' : 'single';
-                            childCb._zoneChanged(mode);
+                            select.value = mode;
+                            publishSelections[childCb.value] = mode;
                         } else {
                             childCb.checked = false;
-                            childCb.closest('.d-flex').querySelector('select').disabled = true;
+                            select.disabled = true;
                             delete publishSelections[childCb.value];
                         }
                     });
@@ -1406,8 +1412,17 @@ async function loadEditClassroomTree() {
                             delete editSelections[c.id];
                         }
                         updateEditCount();
-                        const zoneCb = this.closest('.ms-3').parentElement.querySelector('.zone-checkbox-edit');
-                        if (!this.checked && zoneCb) zoneCb.checked = false;
+                        const zoneContainer = this.closest('.mb-2');
+                        const zoneCb = zoneContainer.querySelector('.zone-checkbox-edit');
+                        if (zoneCb) {
+                            const allInZone = zoneContainer.querySelectorAll('.classroom-checkbox-edit');
+                            const checked = Array.from(allInZone).filter(s => s.checked);
+                            if (checked.length === 0) {
+                                zoneCb.checked = false;
+                            } else if (checked.length === allInZone.length) {
+                                zoneCb.checked = true;
+                            }
+                        }
                     });
 
                     ms.addEventListener('change', function() {
@@ -1416,13 +1431,6 @@ async function loadEditClassroomTree() {
                             updateEditCount();
                         }
                     });
-
-                    cb._zoneChanged = function(mode) {
-                        cb.checked = true;
-                        ms.disabled = false;
-                        ms.value = mode;
-                        editSelections[c.id] = mode;
-                    };
                 });
 
                 zDiv.appendChild(classDiv);
@@ -1430,12 +1438,16 @@ async function loadEditClassroomTree() {
                 zCb.addEventListener('change', function() {
                     const childCbs = this.closest('.mb-2').querySelectorAll('.classroom-checkbox-edit');
                     childCbs.forEach(childCb => {
+                        const select = childCb.closest('.d-flex').querySelector('select');
                         if (this.checked) {
+                            childCb.checked = true;
+                            select.disabled = false;
                             const mode = childCb.dataset.canDouble === 'true' ? 'double' : 'single';
-                            childCb._zoneChanged(mode);
+                            select.value = mode;
+                            editSelections[childCb.value] = mode;
                         } else {
                             childCb.checked = false;
-                            childCb.closest('.d-flex').querySelector('select').disabled = true;
+                            select.disabled = true;
                             delete editSelections[childCb.value];
                         }
                     });
