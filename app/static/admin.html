@@ -150,11 +150,26 @@
         </div>
     </header>
 
-    <div class="content-wrapper">
-        <div class="container mt-5 mb-5">
+    <!-- Tab 导航 -->
+    <div class="container mt-4">
+        <ul class="nav nav-tabs" id="adminTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="recruit-tab" data-bs-toggle="tab" data-bs-target="#recruit-panel" type="button">招募管理</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="classroom-tab" data-bs-toggle="tab" data-bs-target="#classroom-panel" type="button">教室管理</button>
+            </li>
+        </ul>
+    </div>
 
-            <!-- 发布新招募 -->
-        <div class="card p-5 mb-4">
+    <div class="tab-content" id="adminTabContent">
+        <!-- 招募管理 -->
+        <div class="tab-pane fade show active" id="recruit-panel" role="tabpanel">
+            <div class="content-wrapper">
+                <div class="container mt-5 mb-5">
+
+                    <!-- 发布新招募 -->
+                <div class="card p-5 mb-4">
             <h3 class="mb-4">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0d6efd" stroke-width="2" style="vertical-align: -4px; margin-right: 6px">
                     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -210,8 +225,84 @@
                     <tbody></tbody>
                 </table>
             </div>
+                </div>
+            </div>
+        </div><!-- /content-wrapper -->
+    </div><!-- /recruit-panel -->
+
+        <!-- 教室管理 -->
+        <div class="tab-pane fade" id="classroom-panel" role="tabpanel">
+            <div class="container mt-4 mb-5">
+                <!-- 批量导入 -->
+                <div class="card p-4 mb-4">
+                    <h3 class="mb-3">批量导入教室</h3>
+                    <form id="importForm">
+                        <div class="mb-3">
+                            <label class="form-label">选择 Excel 文件</label>
+                            <input type="file" class="form-control" id="importFile" accept=".xlsx,.xls">
+                            <div class="form-text mt-2">
+                                表头格式：教学楼 | 教室名称 | 是否固定桌椅 | 是否具备双考场条件
+                                <a href="#" id="downloadTemplate" class="ms-2">下载模板</a>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-custom">导入</button>
+                    </form>
+                </div>
+
+                <!-- 教室列表 -->
+                <div class="card p-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h3 class="mb-0">教室列表</h3>
+                        <button class="btn btn-custom btn-sm" id="addClassroomBtn">+ 添加教室</button>
+                    </div>
+                    <div id="classroomList"></div>
+                </div>
+            </div>
         </div>
-    </div><!-- /content-wrapper -->
+    </div><!-- /tab-content -->
+
+    <!-- 添加/编辑教室弹窗 -->
+    <div class="modal fade" id="classroomModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="classroomModalTitle">添加教室</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="classroomForm">
+                        <input type="hidden" id="editClassroomId">
+                        <div class="mb-3">
+                            <label class="form-label">教学楼</label>
+                            <select id="formBuildingId" class="form-select" required>
+                                <option value="">选择教学楼</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">教室名称</label>
+                            <input type="text" id="formClassName" class="form-control" required placeholder="如 B101">
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="formFixedSeats">
+                                <label class="form-check-label">固定桌椅（好布置，可多分）</label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="formCanDouble">
+                                <label class="form-check-label">具备双考场条件（大教室）</label>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-custom" id="saveClassroomBtn">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <footer>
         <div class="container">
@@ -641,6 +732,208 @@
 
         // 页面加载时获取列表
         loadRecruitList();
+
+        // ========== 教室管理 ==========
+
+        let classroomEditId = null;
+
+        async function loadBuildingSelect(selectId, selectedId) {
+            try {
+                const res = await fetch('/api/buildings');
+                const list = await res.json();
+                const select = document.getElementById(selectId);
+                select.innerHTML = '<option value="">选择教学楼</option>';
+                list.forEach(b => {
+                    const opt = document.createElement('option');
+                    opt.value = b.id;
+                    opt.textContent = b.name;
+                    if (selectedId && b.id == selectedId) opt.selected = true;
+                    select.appendChild(opt);
+                });
+            } catch (err) {
+                console.error('加载教学楼失败', err);
+            }
+        }
+
+        async function loadClassroomList() {
+            try {
+                const res = await fetch('/api/classrooms');
+                const list = await res.json();
+                const container = document.getElementById('classroomList');
+
+                const groups = {};
+                list.forEach(c => {
+                    const key = c.building_name;
+                    if (!groups[key]) groups[key] = { building_name: key, building_id: c.building_id, zones: {} };
+                    const zone = c.zone || '无分区';
+                    if (!groups[key].zones[zone]) groups[key].zones[zone] = [];
+                    groups[key].zones[zone].push(c);
+                });
+
+                container.innerHTML = '';
+                for (const [bname, building] of Object.entries(groups)) {
+                    const buildingCard = document.createElement('div');
+                    buildingCard.className = 'mb-4';
+                    let html = `<h5 class="mb-2">🏫 ${bname}</h5>`;
+                    for (const [zone, classrooms] of Object.entries(building.zones)) {
+                        html += `<div class="ms-3 mb-2"><span class="text-muted small">${zone}</span>`;
+                        html += `<div class="d-flex flex-wrap gap-2 mt-1">`;
+                        classrooms.forEach(c => {
+                            const seatIcon = c.is_fixed_seats ? '🪑' : '📦';
+                            const seatLabel = c.is_fixed_seats ? '固定' : '活动';
+                            const doubleLabel = c.can_double_exam ? '可双考场' : '仅单考场';
+                            html += `<div class="border rounded p-2" style="min-width:120px;background:#f8f9fa">
+                                <div><strong>${c.name}</strong></div>
+                                <div class="small text-muted">${seatIcon} ${seatLabel}</div>
+                                <div class="small text-muted">${doubleLabel}</div>
+                                <div class="mt-1">
+                                    <a href="#" class="small me-2 classroom-edit" data-id="${c.id}" data-building-id="${c.building_id}" data-name="${c.name}" data-fixed="${c.is_fixed_seats}" data-double="${c.can_double_exam}">编辑</a>
+                                    <a href="#" class="small text-danger classroom-delete" data-id="${c.id}" data-name="${c.name}">删除</a>
+                                </div>
+                            </div>`;
+                        });
+                        html += `</div></div>`;
+                    }
+                    buildingCard.innerHTML = html;
+                    container.appendChild(buildingCard);
+                }
+
+                // 绑定事件（使用事件委托）
+                container.querySelectorAll('.classroom-edit').forEach(el => {
+                    el.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        classroomEditId = parseInt(this.dataset.id);
+                        document.getElementById('classroomModalTitle').textContent = '编辑教室';
+                        document.getElementById('formClassName').value = this.dataset.name;
+                        document.getElementById('formClassName').disabled = true;
+                        document.getElementById('formFixedSeats').checked = this.dataset.fixed === 'true';
+                        document.getElementById('formCanDouble').checked = this.dataset.double === 'true';
+                        loadBuildingSelect('formBuildingId', this.dataset.buildingId);
+                        new bootstrap.Modal(document.getElementById('classroomModal')).show();
+                    });
+                });
+                container.querySelectorAll('.classroom-delete').forEach(el => {
+                    el.addEventListener('click', async function(e) {
+                        e.preventDefault();
+                        if (!await showConfirm('确认删除', `确定删除教室「${this.dataset.name}」吗？`)) return;
+                        try {
+                            const res = await fetch(`/api/classrooms/${this.dataset.id}`, {
+                                method: 'DELETE',
+                                headers: { 'X-CSRF-Token': document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '' }
+                            });
+                            const data = await res.json();
+                            showToast(data.msg, data.code === 0 ? 'success' : 'danger');
+                            if (data.code === 0) loadClassroomList();
+                        } catch (err) {
+                            showToast('删除失败', 'danger');
+                        }
+                    });
+                });
+            } catch (err) {
+                console.error('加载教室列表失败', err);
+            }
+        }
+
+        // Excel 导入
+        document.getElementById('importForm')?.addEventListener('submit', async e => {
+            e.preventDefault();
+            const fileInput = document.getElementById('importFile');
+            if (!fileInput.files.length) {
+                showToast('请选择文件', 'warning');
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            const csrf = document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+            try {
+                const res = await fetch('/api/classrooms/import', {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-CSRF-Token': csrf }
+                });
+                const data = await res.json();
+                showToast(data.msg, data.code === 0 ? 'success' : 'danger');
+                if (data.code === 0) {
+                    fileInput.value = '';
+                    loadClassroomList();
+                    loadBuildingSelect('formBuildingId');
+                }
+            } catch (err) {
+                showToast('导入失败', 'danger');
+            }
+        });
+
+        // 添加教室按钮
+        document.getElementById('addClassroomBtn')?.addEventListener('click', () => {
+            classroomEditId = null;
+            document.getElementById('classroomModalTitle').textContent = '添加教室';
+            document.getElementById('classroomForm').reset();
+            document.getElementById('formClassName').disabled = false;
+            loadBuildingSelect('formBuildingId');
+            new bootstrap.Modal(document.getElementById('classroomModal')).show();
+        });
+
+        // 保存教室
+        document.getElementById('saveClassroomBtn')?.addEventListener('click', async () => {
+            const formData = new FormData();
+            formData.append('building_id', document.getElementById('formBuildingId').value);
+            formData.append('name', document.getElementById('formClassName').value);
+            formData.append('is_fixed_seats', document.getElementById('formFixedSeats').checked);
+            formData.append('can_double_exam', document.getElementById('formCanDouble').checked);
+
+            if (!formData.get('building_id')) {
+                showToast('请选择教学楼', 'warning');
+                return;
+            }
+            if (!formData.get('name') || !formData.get('name').trim()) {
+                showToast('请输入教室名称', 'warning');
+                return;
+            }
+
+            const csrf = document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+            try {
+                const url = classroomEditId ? `/api/classrooms/${classroomEditId}` : '/api/classrooms';
+                const method = classroomEditId ? 'PUT' : 'POST';
+
+                // For PUT, only send changeable fields
+                const body = new FormData();
+                body.append('is_fixed_seats', document.getElementById('formFixedSeats').checked);
+                body.append('can_double_exam', document.getElementById('formCanDouble').checked);
+
+                const res = await fetch(url, {
+                    method,
+                    body: classroomEditId ? body : formData,
+                    headers: { 'X-CSRF-Token': csrf }
+                });
+                const data = await res.json();
+                showToast(data.msg, data.code === 0 ? 'success' : 'danger');
+                if (data.code === 0) {
+                    bootstrap.Modal.getInstance(document.getElementById('classroomModal')).hide();
+                    loadClassroomList();
+                }
+            } catch (err) {
+                showToast('保存失败', 'danger');
+            }
+        });
+
+        // Tab 切换时加载教室数据
+        document.getElementById('classroom-tab')?.addEventListener('shown.bs.tab', () => {
+            loadClassroomList();
+            loadBuildingSelect('formBuildingId');
+        });
+
+        // 下载模板
+        document.getElementById('downloadTemplate')?.addEventListener('click', e => {
+            e.preventDefault();
+            const csv = '﻿教学楼,教室名称,是否固定桌椅,是否具备双考场条件\n树人楼,B101,否,是\n树人楼,A201,否,否\n综合楼,101,是,是';
+            const blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '教室导入模板.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        });
     </script>
 </body>
 </html>
