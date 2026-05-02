@@ -57,6 +57,17 @@
                     <label class="form-label">QQ号</label>
                     <input type="text" name="qq" class="form-control" required placeholder="纯数字，用于接收验证码">
                 </div>
+                <div class="mb-3">
+                    <label class="form-label d-block">性别</label>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="gender" value="男" required checked>
+                        <label class="form-check-label">男</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="gender" value="女" required>
+                        <label class="form-check-label">女</label>
+                    </div>
+                </div>
                 <div class="mb-4">
                     <label class="form-label d-block">是否有经验</label>
                     <div class="form-check form-check-inline">
@@ -182,6 +193,7 @@
             name: '',
             phone: '',
             qq: '',
+            gender: '男',
             has_experience: 'false'
         };
 
@@ -223,6 +235,7 @@
                 document.querySelector('input[name="phone"]').value = formInputValues.phone;
                 document.querySelector('input[name="qq"]').value = formInputValues.qq;
                 document.querySelector(`input[name="has_experience"][value="${formInputValues.has_experience}"]`).checked = true;
+                document.querySelector(`input[name="gender"][value="${formInputValues.gender}"]`).checked = true;
 
             } catch (err) {
                 console.error("加载考试列表失败:", err);
@@ -256,6 +269,12 @@
             document.querySelectorAll('input[name="has_experience"]').forEach(radio => {
                 radio.addEventListener('change', function () {
                     formInputValues.has_experience = this.value;
+                });
+            });
+
+            document.querySelectorAll('input[name="gender"]').forEach(radio => {
+                radio.addEventListener('change', function () {
+                    formInputValues.gender = this.value;
                 });
             });
         }
@@ -385,6 +404,19 @@
                             row3.appendChild(r3c1);
                             row3.appendChild(r3c2);
                             li.appendChild(row3);
+
+                            // 性别
+                            const rowGender = document.createElement("div");
+                            rowGender.className = "row mb-1";
+                            const rgc1 = document.createElement("div");
+                            rgc1.className = "col-3 text-muted small";
+                            rgc1.textContent = "性别";
+                            const rgc2 = document.createElement("div");
+                            rgc2.className = "col-9";
+                            rgc2.textContent = item.gender || "男";
+                            rowGender.appendChild(rgc1);
+                            rowGender.appendChild(rgc2);
+                            li.appendChild(rowGender);
 
                             // 考务QQ加群链接
                             if (item.qq_group) {
