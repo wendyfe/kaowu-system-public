@@ -943,6 +943,10 @@
                 const res = await fetch('/api/classrooms?include_disabled=true');
                 const list = await res.json();
                 const container = document.getElementById('classroomList');
+                if (list.length === 0) {
+                    container.innerHTML = '<div class="text-muted text-center py-4">暂无教室数据，请先导入或添加教室</div>';
+                    return;
+                }
 
                 const groups = {};
                 list.forEach(c => {
@@ -1277,6 +1281,7 @@ async function loadPublishClassroomTree() {
                     ms.style.width = '100%';
                     ms.disabled = true;
                     ms.innerHTML = '<option value="single">单考场</option><option value="double">' + (c.can_double_exam ? '双考场' : '双考场(不可用)') + '</option>';
+                    ms.value = c.can_double_exam ? 'double' : 'single';
                     if (!c.can_double_exam) ms.querySelector('[value="double"]').disabled = true;
                     card.appendChild(ms);
 
@@ -1447,6 +1452,7 @@ async function loadEditClassroomTree() {
                     ms.style.width = '100%';
                     ms.disabled = true;
                     ms.innerHTML = `<option value="single">单考场</option><option value="double">${c.can_double_exam ? '双考场' : '双考场(不可用)'}</option>`;
+                    ms.value = c.can_double_exam ? 'double' : 'single';
                     if (!c.can_double_exam) ms.querySelector('[value="double"]').disabled = true;
                     card.appendChild(ms);
 
