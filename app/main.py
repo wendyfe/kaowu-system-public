@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, func, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, func, UniqueConstraint, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, timedelta
@@ -174,6 +174,7 @@ class Classroom(Base):
     name = Column(String(50), nullable=False)  # 如"B101""102"
     is_fixed_seats = Column(Boolean, default=False)   # True=固定桌椅
     can_double_exam = Column(Boolean, default=False)  # True=具备双考场条件
+    is_enabled = Column(Boolean, default=True)         # True=可用作考场
     __table_args__ = (UniqueConstraint('building_id', 'name', name='uq_building_classroom'),)
 
 
@@ -192,6 +193,14 @@ class AcceptanceRecord(Base):
 
 
 Base.metadata.create_all(bind=engine)
+
+# 数据库迁移：新增字段
+try:
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE classrooms ADD COLUMN is_enabled BOOLEAN DEFAULT 1"))
+        conn.commit()
+except Exception:
+    pass  # 字段已存在
 
 def get_db():
     db = SessionLocal()
@@ -961,6 +970,9 @@ async def student_register(
                 ip_address=ip
             )
             db.add(reg)
+            # 添加后检查是否已满，满则关闭招募
+            if current_count + 1 >= recruit.need_num:
+                recruit.is_active = False
 
     if is_full:
         raise HTTPException(400, "报名人数已满")
@@ -1226,11 +1238,13 @@ async def get_buildings(db: Session = Depends(get_db)):
 
 
 @app.get("/api/classrooms")
-async def get_classrooms(building_id: int = None, db: Session = Depends(get_db)):
+async def get_classrooms(building_id: int = None, include_disabled: bool = False, db: Session = Depends(get_db)):
     """获取教室列表，可按教学楼筛选"""
     query = db.query(Classroom)
     if building_id:
         query = query.filter(Classroom.building_id == building_id)
+    if not include_disabled:
+        query = query.filter(Classroom.is_enabled == True)
     classrooms = query.order_by(Classroom.building_id, Classroom.name).all()
 
     # 批量获取 building 名称
@@ -1251,6 +1265,7 @@ async def get_classrooms(building_id: int = None, db: Session = Depends(get_db))
             "zone": zone,
             "is_fixed_seats": c.is_fixed_seats,
             "can_double_exam": c.can_double_exam,
+            "is_enabled": c.is_enabled,
         })
     return result
 
@@ -1355,6 +1370,26 @@ async def delete_classroom(
     db.delete(classroom)
     db.commit()
     return {"code": 0, "msg": "删除成功"}
+
+
+@app.put("/api/classrooms/{classroom_id}/toggle-enabled")
+async def toggle_classroom_enabled(
+    request: Request,
+    classroom_id: int,
+    db: Session = Depends(get_db)
+):
+    """切换教室的启用/禁用状态"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
+    if not classroom:
+        raise HTTPException(404, "教室不存在")
+
+    classroom.is_enabled = not classroom.is_enabled
+    db.commit()
+    status = "启用" if classroom.is_enabled else "禁用"
+    return {"code": 0, "msg": f"教室已{status}", "is_enabled": classroom.is_enabled}
 
 
 @app.get("/api/recruit/{recruit_id}/classrooms")

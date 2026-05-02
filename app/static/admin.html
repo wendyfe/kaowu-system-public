@@ -923,7 +923,7 @@
 
         async function loadClassroomList() {
             try {
-                const res = await fetch('/api/classrooms');
+                const res = await fetch('/api/classrooms?include_disabled=true');
                 const list = await res.json();
                 const container = document.getElementById('classroomList');
 
@@ -961,11 +961,12 @@
                         classrooms.forEach(c => {
                             const card = document.createElement('div');
                             card.className = 'border rounded p-2';
-                            card.style.cssText = 'min-width:120px;background:#f8f9fa';
+                            const isDisabled = c.is_enabled === false;
+                            card.style.cssText = 'min-width:120px;background:' + (isDisabled ? '#eee' : '#f8f9fa') + ';opacity:' + (isDisabled ? '0.6' : '1');
 
                             const nameEl = document.createElement('div');
                             const strong = document.createElement('strong');
-                            strong.textContent = c.name;
+                            strong.textContent = c.name + (isDisabled ? ' (已禁用)' : '');
                             nameEl.appendChild(strong);
                             card.appendChild(nameEl);
 
@@ -981,6 +982,15 @@
 
                             const actions = document.createElement('div');
                             actions.className = 'mt-1';
+
+                            const toggleLink = document.createElement('a');
+                            toggleLink.href = '#';
+                            toggleLink.className = 'small me-2 classroom-toggle';
+                            toggleLink.textContent = isDisabled ? '启用' : '禁用';
+                            toggleLink.dataset.id = c.id;
+                            toggleLink.dataset.name = c.name;
+                            toggleLink.dataset.enabled = c.is_enabled;
+                            actions.appendChild(toggleLink);
 
                             const editLink = document.createElement('a');
                             editLink.href = '#';
@@ -1024,6 +1034,24 @@
                         document.getElementById('formCanDouble').checked = this.dataset.double === 'true';
                         loadBuildingSelect('formBuildingId', this.dataset.buildingId);
                         new bootstrap.Modal(document.getElementById('classroomModal')).show();
+                    });
+                });
+                container.querySelectorAll('.classroom-toggle').forEach(el => {
+                    el.addEventListener('click', async function(e) {
+                        e.preventDefault();
+                        const action = this.dataset.enabled === 'true' ? '禁用' : '启用';
+                        if (!await showConfirm('确认操作', `确定${action}教室「${this.dataset.name}」吗？`)) return;
+                        try {
+                            const res = await fetch(`/api/classrooms/${this.dataset.id}/toggle-enabled`, {
+                                method: 'PUT',
+                                headers: { 'X-CSRF-Token': document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '' }
+                            });
+                            const data = await res.json();
+                            showToast(data.msg, data.code === 0 ? 'success' : 'danger');
+                            if (data.code === 0) loadClassroomList();
+                        } catch (err) {
+                            showToast('操作失败', 'danger');
+                        }
                     });
                 });
                 container.querySelectorAll('.classroom-delete').forEach(el => {
@@ -1205,8 +1233,12 @@ async function loadPublishClassroomTree() {
                 classDiv.className = 'ms-3 d-flex flex-wrap gap-2';
 
                 classrooms.forEach(c => {
-                    const row = document.createElement('div');
-                    row.className = 'd-inline-flex align-items-center';
+                    const card = document.createElement('div');
+                    card.className = 'border rounded p-2 text-center';
+                    card.style.cssText = 'width:210px;background:#f8f9fa';
+
+                    const checkRow = document.createElement('div');
+                    checkRow.className = 'form-check mb-1 justify-content-center';
 
                     const cb = document.createElement('input');
                     cb.type = 'checkbox';
@@ -1214,21 +1246,23 @@ async function loadPublishClassroomTree() {
                     cb.value = c.id;
                     cb.dataset.canDouble = c.can_double_exam;
 
-                    const nameSpan = document.createElement('span');
-                    nameSpan.className = 'small';
-                    nameSpan.textContent = c.name + (c.is_fixed_seats ? ' 🪑' : '');
+                    const label = document.createElement('label');
+                    label.className = 'form-check-label small';
+                    label.textContent = c.name + (c.is_fixed_seats ? ' 🪑' : '');
+
+                    checkRow.appendChild(cb);
+                    checkRow.appendChild(label);
+                    card.appendChild(checkRow);
 
                     const ms = document.createElement('select');
                     ms.className = 'form-select form-select-sm';
-                    ms.style.width = '100px';
+                    ms.style.width = '100%';
                     ms.disabled = true;
                     ms.innerHTML = '<option value="single">单考场</option><option value="double">' + (c.can_double_exam ? '双考场' : '双考场(不可用)') + '</option>';
                     if (!c.can_double_exam) ms.querySelector('[value="double"]').disabled = true;
+                    card.appendChild(ms);
 
-                    row.appendChild(cb);
-                    row.appendChild(nameSpan);
-                    row.appendChild(ms);
-                    classDiv.appendChild(row);
+                    classDiv.appendChild(card);
 
                     // Restore selection state
                     if (publishSelections[c.id] !== undefined) {
@@ -1368,8 +1402,12 @@ async function loadEditClassroomTree() {
                 classDiv.className = 'ms-3 d-flex flex-wrap gap-2';
 
                 classrooms.forEach(c => {
-                    const row = document.createElement('div');
-                    row.className = 'd-inline-flex align-items-center';
+                    const card = document.createElement('div');
+                    card.className = 'border rounded p-2 text-center';
+                    card.style.cssText = 'width:210px;background:#f8f9fa';
+
+                    const checkRow = document.createElement('div');
+                    checkRow.className = 'form-check mb-1 justify-content-center';
 
                     const cb = document.createElement('input');
                     cb.type = 'checkbox';
@@ -1377,21 +1415,23 @@ async function loadEditClassroomTree() {
                     cb.value = c.id;
                     cb.dataset.canDouble = c.can_double_exam;
 
-                    const nameSpan = document.createElement('span');
-                    nameSpan.className = 'small';
-                    nameSpan.textContent = c.name + (c.is_fixed_seats ? ' 🪑' : '');
+                    const label = document.createElement('label');
+                    label.className = 'form-check-label small';
+                    label.textContent = c.name + (c.is_fixed_seats ? ' 🪑' : '');
+
+                    checkRow.appendChild(cb);
+                    checkRow.appendChild(label);
+                    card.appendChild(checkRow);
 
                     const ms = document.createElement('select');
                     ms.className = 'form-select form-select-sm';
-                    ms.style.width = '100px';
+                    ms.style.width = '100%';
                     ms.disabled = true;
                     ms.innerHTML = `<option value="single">单考场</option><option value="double">${c.can_double_exam ? '双考场' : '双考场(不可用)'}</option>`;
                     if (!c.can_double_exam) ms.querySelector('[value="double"]').disabled = true;
+                    card.appendChild(ms);
 
-                    row.appendChild(cb);
-                    row.appendChild(nameSpan);
-                    row.appendChild(ms);
-                    classDiv.appendChild(row);
+                    classDiv.appendChild(card);
 
                     if (editSelections[c.id] !== undefined) {
                         cb.checked = true;
