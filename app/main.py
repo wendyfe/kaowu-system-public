@@ -106,6 +106,7 @@ class Registration(Base):
     create_time = Column(DateTime, default=now_beijing)
     # 新增字段：经验（建议用布尔，简单；或者用字符串 "有经验"/"无经验" 更直观）
     has_experience = Column(Boolean, nullable=False, default=False)  # True=有经验, False=无经验
+    gender = Column(String(4), nullable=False, default="男")  # "男" 或 "女"
 
 # 新增验证码记录表（可选，替代内存存储）
 class VerifyCode(Base):
@@ -579,6 +580,7 @@ async def view_registrations(request: Request, recruit_id: int, db: Session = De
         "id": r.id,
         "student_id": r.student_id,
         "name": r.name,
+        "gender": r.gender,
         "phone": r.phone,
         "qq": r.qq,
         "has_experience": r.has_experience,
@@ -596,6 +598,7 @@ async def student_register(
     phone: str = Form(...),
     qq: str = Form(...),  # 新增QQ字段
     has_experience: bool = Form(...),   # 新增：前端会传 "true"/"false" 或 "1"/"0"，FastAPI 会转 bool
+    gender: str = Form(...),
     db: Session = Depends(get_db)
 ):
     rate_limit(f"reg_{get_client_ip(request)}", max_requests=10, window=60)
@@ -608,6 +611,9 @@ async def student_register(
     # 校验QQ号
     if not qq.isdigit():
         raise HTTPException(400, "QQ号必须是纯数字")
+    # 校验性别
+    if gender not in ("男", "女"):
+        raise HTTPException(400, "性别必须是男或女")
 
     ip = get_client_ip(request)
     
@@ -649,6 +655,7 @@ async def student_register(
                 phone=phone,
                 qq=qq,
                 has_experience=has_experience,
+                gender=gender,
                 ip_address=ip
             )
             db.add(reg)
@@ -702,6 +709,7 @@ async def my_registrations(
                 "status": "已报名",
                 "can_cancel": can_cancel,  # 新增可取消标识
                 "qq": reg.qq,  # 新增QQ号
+                "gender": reg.gender,
                 "qq_group": recruit.qq_group  # 考务QQ群号
             })
     return {"code": 0, "data": result}
@@ -795,6 +803,7 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
         data.append({
             "学号": reg.student_id,
             "姓名": reg.name,
+            "性别": "男" if reg.gender == "男" else "女",
             "手机号": reg.phone,
             "QQ号": reg.qq,  # 新增QQ号导出
             "是否有经验": "有" if reg.has_experience else "无",   # ← 新增，友好显示
