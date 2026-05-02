@@ -388,6 +388,25 @@
         </div>
     </div>
 
+    <!-- 恢复管理弹窗 -->
+    <div class="modal fade" id="recoveryModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="recoveryModalTitle">考后恢复</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="recoveryModalBody">
+                    <div class="text-center py-4 text-muted">加载中...</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-warning" id="initRecoveryBtn">🧹 开启恢复阶段</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <footer>
         <div class="container">
             <p class="mb-0">© 2026 考务报名管理系统 - 所有权利保留</p>
@@ -670,6 +689,17 @@
                         openAcceptancePanel(item.id, item.exam_name);
                     };
                     tdActions.appendChild(acceptLink);
+
+                    // 恢复
+                    const recoveryLink = document.createElement("a");
+                    recoveryLink.href = "#";
+                    recoveryLink.className = 'action-link';
+                    recoveryLink.textContent = "恢复";
+                    recoveryLink.onclick = function (e) {
+                        e.preventDefault();
+                        openRecoveryPanel(item.id, item.exam_name);
+                    };
+                    tdActions.appendChild(recoveryLink);
 
                     // 删除
                     const delLink = document.createElement("a");
@@ -1572,6 +1602,82 @@ document.getElementById('sealAllBtn')?.addEventListener('click', async () => {
         const data = await res.json();
         showToast(data.msg || data.detail, data.code === 0 ? 'success' : 'danger');
         if (data.code === 0) await loadAcceptanceData(currentAcceptRecruitId);
+    } catch (err) {
+        showToast('操作失败', 'danger');
+    }
+});
+
+// ========== 考后恢复 ==========
+
+let currentRecoveryRecruitId = null;
+
+async function openRecoveryPanel(recruitId, examName) {
+    currentRecoveryRecruitId = recruitId;
+    document.getElementById('recoveryModalTitle').textContent = `考后恢复 — ${examName}`;
+    document.getElementById('recoveryModalBody').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('recoveryModal')).show();
+    await loadRecoveryProgress(recruitId);
+}
+
+async function loadRecoveryProgress(recruitId) {
+    try {
+        const res = await fetch(`/api/recruit/${recruitId}/recovery-progress`);
+        if (!res.ok) throw new Error('加载失败');
+        const data = await res.json();
+        renderRecovery(data.data || []);
+    } catch (err) {
+        document.getElementById('recoveryModalBody').innerHTML = '<div class="text-danger text-center py-4">加载失败</div>';
+    }
+}
+
+function renderRecovery(items) {
+    const container = document.getElementById('recoveryModalBody');
+    if (!items || items.length === 0) {
+        container.innerHTML = '<div class="text-center py-4"><div class="text-muted mb-3">暂无恢复任务，点击「开启恢复阶段」创建</div></div>';
+        return;
+    }
+
+    const zones = {};
+    items.forEach(item => {
+        const z = item.zone_name || '无分区';
+        if (!zones[z]) zones[z] = [];
+        zones[z].push(item);
+    });
+
+    let html = '';
+    let totalDone = 0;
+    for (const [zone, zoneItems] of Object.entries(zones)) {
+        html += `<div class="mb-3"><h5 class="border-bottom pb-1">🏢 ${zone}</h5>`;
+        zoneItems.forEach(item => {
+            if (item.all_done) totalDone++;
+            html += `<div class="d-flex justify-content-between align-items-center border-bottom py-2">
+                <strong>${item.classroom_name}</strong>
+                <div class="d-flex align-items-center gap-2">
+                    <div class="progress" style="width:100px;height:8px;">
+                        <div class="progress-bar ${item.all_done ? 'bg-success' : 'bg-warning'}" style="width:${item.percent}%"></div>
+                    </div>
+                    <span class="small text-muted">${item.progress}</span>
+                </div>
+            </div>`;
+        });
+        html += '</div>';
+    }
+    html += `<div class="text-muted small mt-2">共 ${items.length} 间教室，已完成 ${totalDone} 间</div>`;
+    container.innerHTML = html;
+}
+
+document.getElementById('initRecoveryBtn')?.addEventListener('click', async () => {
+    if (!currentRecoveryRecruitId) return;
+    if (!await showConfirm('确认开启', '确定开启恢复阶段吗？所有已封门教室的恢复任务将被创建。')) return;
+    const csrf = document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+    try {
+        const res = await fetch(`/api/recruit/${currentRecoveryRecruitId}/init-recovery`, {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrf }
+        });
+        const data = await res.json();
+        showToast(data.msg || data.detail, data.code === 0 ? 'success' : 'danger');
+        if (data.code === 0) await loadRecoveryProgress(currentRecoveryRecruitId);
     } catch (err) {
         showToast('操作失败', 'danger');
     }
