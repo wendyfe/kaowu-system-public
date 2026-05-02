@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, func
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, func, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, timedelta
@@ -124,6 +124,7 @@ class Classroom(Base):
     name = Column(String(50), nullable=False)  # 如"B101""102"
     is_fixed_seats = Column(Boolean, default=False)   # True=固定桌椅
     can_double_exam = Column(Boolean, default=False)  # True=具备双考场条件
+    __table_args__ = (UniqueConstraint('building_id', 'name', name='uq_building_classroom'),)
 
 Base.metadata.create_all(bind=engine)
 
@@ -180,13 +181,13 @@ def _cleanup_rate_limits():
 
 # ==================== 考场工具函数 ====================
 
-def detect_zone(classroom_name: str):
+def detect_zone(classroom_name: str) -> str | None:
     """从教室名称推导"栋"信息。
     规则：
     - 首字母为英文字母 → 返回该字母 + "栋"（B101 → B栋）
     - 首字母为数字 → 返回 None（综合楼 101 → 无分区）
     """
-    if not classroom_name:
+    if not classroom_name or not classroom_name.strip():
         return None
     first_char = classroom_name.strip()[0]
     if 'A' <= first_char.upper() <= 'Z':
