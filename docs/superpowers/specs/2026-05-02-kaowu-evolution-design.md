@@ -40,6 +40,7 @@
 
 | 新增字段 | 说明 |
 |---------|------|
+| general_supervisor_id | int，关联 registration.id，总负责人（可选）|
 | has_floor_supervisors | bool，是否需要楼栋负责人（大考/小考自适应） |
 
 **recruitment_classrooms（招募-教室关联）**
@@ -78,6 +79,15 @@
 | id | int PK | |
 | group_id | int FK | |
 | recruitment_classroom_id | int FK | 关联的招募教室 |
+
+**building_supervisors（楼栋负责人）**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | int PK | |
+| recruitment_id | int FK | |
+| zone_name | string | 负责人负责的栋（如"B栋"）|
+| registration_id | int FK | 关联报名记录，一人可对应多条（负责多栋） |
 
 **task_checklist_items（布置清单模板项）**
 
@@ -171,32 +181,45 @@
 **其他：**
 - 发布时自动编排考场号（按选择顺序从1开始）
 - 新增配置：是否需要楼栋负责人（控制验收层级）
-- 新增配置：总负责人 = 管理员本人（默认）
 
-### 2.3 分组排班
+### 2.3 分组排班（手动流程）
 
-**流程：**
+招募关闭后，管理员打开分组面板，按 4 步操作：
 
-1. 系统按楼栋/栋自动分配人员
-2. 配对规则：男女搭配 > 有经验+无经验搭配 > 数量均衡
-3. 固定桌椅教室 → 每组多分几间；活动桌椅 → 每组少分
-4. 每栋推荐1名有经验者作为楼栋负责人（可选层级）
-5. 管理员在面板上拖拽微调
+**Step 1 — 选总负责人（1人）**
+- 从报名列表中单选 1 人设为总负责人
+- 可选，跳过有提示"建议指定总负责人"
 
-**拖拽面板（楼栋视角）：**
+**Step 2 — 选楼栋负责人（每栋1人，一人可兼多栋）**
+- 按栋展示（B栋、A栋、D栋...），每栋从报名列表中选 1 人
+- 同一人可以负责多栋（选择时展示已选过的候选人）
+- 可选，跳过有提示
+
+**Step 3 — 拖拽分组**
+- 总负责人和楼栋负责人自动排除，不参与分组
+- 左侧待分区（剩余报名人员）→ 右侧组卡片区，SortableJS 拖拽
+- 支持：从待分区拖入组、组间拖拽交换、组内拖出回待分区
+- 管理员可"新增空组"
+
+**Step 4 — 分配教室**
+- 分组完成后，管理员为每组勾选负责的教室
+- 每间教室只能分配给一个组（已分配的教室对其他组置灰不可选）
+- 每行显示：教室名 + 考场数（单=1 双=2）
+- 底部显示每组统计：已分配 X 间教室 → 共 Y 个考场
+
+**分组面板 UI（4 标签页）：**
 
 ```
-树人楼
-  └── B栋 → 楼栋负责人：王五（有经验）[更换]
-       ├── 第1组：张三（有）+李四（无）
-       │    ├ B101（固定）
-       │    └ B102（固定）
-       └── 第2组：赵六（有）+钱七（无）
-            ├ B103（固定）
-            └ A201（活动）
+┌─ 分组排班 ───────────────────────────────────┐
+│ [①总负责人] [②楼栋负责人] [③拖拽分组] [④分配教室] │
+│                                               │
+│ （当前 tab 内容）                              │
+│                                               │
+│            [上一步]               [下一步]      │
+└───────────────────────────────────────────────┘
 ```
 
-允许拖拽：人员跨组交换、教室跨组调整。
+**保存时：** 创建分组记录、任务清单、验收记录（与原来自动分组后相同）。
 
 ### 2.4 布置清单
 
@@ -248,15 +271,18 @@
 ## 3. 现有代码改动
 
 ### main.py
-- 新增数据模型：Building, Classroom, RecruitmentClassroom, RecruitmentGroup, RecruitmentGroupMember, RecruitmentGroupClassroom, TaskChecklistItem, ClassroomTaskProgress, AcceptanceRecord
+- 新增数据模型：Building, Classroom, RecruitmentClassroom, RecruitmentGroup, RecruitmentGroupMember, RecruitmentGroupClassroom, BuildingSupervisor, TaskChecklistItem, ClassroomTaskProgress, AcceptanceRecord
 - 新增 API：教室管理 CRUD、分组排班、清单进度、验收、恢复
-- 现有 Recruitment 表新增字段
+- 现有 Recruitment 表新增字段（general_supervisor_id）
 - 现有 Registration 表新增性别字段
+- **删除自动分组算法**：auto_assign_groups() 和 save_groups_to_db() 不再使用
+- **新增手动分组 API**：设置总负责人、设置楼栋负责人、创建/删除组、拖拽成员、分配教室
+- **新增 BuildingSupervisor 模型**
 
 ### admin.html
 - 新增"教室管理"页面
 - 发布招募表单新增"选择考场"区块
-- 新增"分组排班"面板（拖拽交互）
+- **分组排班面板重写**：改为 4 标签页手动流程（总负责人→楼栋负责人→拖拽分组→分配教室）
 - 新增"验收总览"面板
 
 ### student.html
