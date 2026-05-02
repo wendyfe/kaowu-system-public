@@ -94,6 +94,32 @@ class RecruitmentClassroom(Base):
     exam_mode = Column(String(10), nullable=False, default="single")  # 'single' 或 'double'
     exam_number_start = Column(Integer, nullable=False)  # 该教室考场起始号
 
+
+class RecruitmentGroup(Base):
+    """分组：按栋/区划分的组"""
+    __tablename__ = "recruitment_groups"
+    id = Column(Integer, primary_key=True)
+    recruitment_id = Column(Integer, nullable=False)
+    zone_name = Column(String(20), nullable=True)
+    is_supervisor = Column(Boolean, default=False)
+
+
+class RecruitmentGroupMember(Base):
+    """组成员"""
+    __tablename__ = "recruitment_group_members"
+    id = Column(Integer, primary_key=True)
+    group_id = Column(Integer, nullable=False)
+    registration_id = Column(Integer, nullable=False)
+
+
+class RecruitmentGroupClassroom(Base):
+    """组-教室分配"""
+    __tablename__ = "recruitment_group_classrooms"
+    id = Column(Integer, primary_key=True)
+    group_id = Column(Integer, nullable=False)
+    recruitment_classroom_id = Column(Integer, nullable=False)
+
+
 class Registration(Base):
     __tablename__ = "registration"
     id = Column(Integer, primary_key=True)
