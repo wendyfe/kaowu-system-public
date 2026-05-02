@@ -83,6 +83,7 @@ class Recruitment(Base):
     create_time = Column(DateTime, default=now_beijing)
     is_active = Column(Boolean, default=True)
     qq_group = Column(String(300), nullable=True)  # QQ加群链接（qm.qq.com 或 tencent:// 协议）
+    general_supervisor_id = Column(Integer, nullable=True)  # 总负责人，关联 registration.id
     end_time = Column(DateTime, nullable=True)   # 北京时间
 
 class RecruitmentClassroom(Base):
@@ -192,7 +193,37 @@ class AcceptanceRecord(Base):
     updated_at = Column(DateTime, default=now_beijing, onupdate=now_beijing)
 
 
+class BuildingSupervisor(Base):
+    """楼栋负责人"""
+    __tablename__ = "building_supervisors"
+    id = Column(Integer, primary_key=True)
+    recruitment_id = Column(Integer, nullable=False)
+    zone_name = Column(String(20), nullable=False)    # 如 "B栋"
+    registration_id = Column(Integer, nullable=False)  # 关联 registration.id
+
+
 Base.metadata.create_all(bind=engine)
+
+# 数据库迁移：手动分组相关字段
+try:
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE recruitment ADD COLUMN general_supervisor_id INTEGER DEFAULT NULL"))
+        conn.commit()
+except Exception:
+    pass  # 字段已存在
+try:
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS building_supervisors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recruitment_id INTEGER NOT NULL,
+                zone_name VARCHAR(20) NOT NULL,
+                registration_id INTEGER NOT NULL
+            )
+        """))
+        conn.commit()
+except Exception:
+    pass  # 表已存在
 
 # 数据库迁移：新增字段
 try:
