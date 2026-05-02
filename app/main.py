@@ -701,12 +701,12 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
 async def import_classrooms(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
     check_admin_login(request)
     check_csrf(request)
+    rate_limit(f"classroom_import_{get_client_ip(request)}", max_requests=5, window=60)
 
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(400, "请上传 .xlsx 或 .xls 文件")
 
     try:
-        import pandas as pd
         contents = await file.read()
         df = pd.read_excel(BytesIO(contents))
 
@@ -814,6 +814,10 @@ async def create_classroom(
     if not building:
         raise HTTPException(400, "教学楼不存在")
 
+    name = name.strip()
+    if not name:
+        raise HTTPException(400, "教室名称不能为空")
+
     exists = db.query(Classroom).filter(
         Classroom.building_id == building_id,
         Classroom.name == name
@@ -837,8 +841,10 @@ async def create_classroom(
 async def update_classroom(
     request: Request,
     classroom_id: int,
-    is_fixed_seats: bool = Form(...),
-    can_double_exam: bool = Form(...),
+    name: str = Form(None),
+    building_id: int = Form(None),
+    is_fixed_seats: bool = Form(False),
+    can_double_exam: bool = Form(False),
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
@@ -847,6 +853,28 @@ async def update_classroom(
     classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
     if not classroom:
         raise HTTPException(404, "教室不存在")
+
+    if name is not None:
+        name = name.strip()
+        if not name:
+            raise HTTPException(400, "教室名称不能为空")
+        if building_id is None:
+            building_id = classroom.building_id
+        # Check duplicate
+        dup = db.query(Classroom).filter(
+            Classroom.building_id == building_id,
+            Classroom.name == name,
+            Classroom.id != classroom_id
+        ).first()
+        if dup:
+            raise HTTPException(400, f"教室名称 {name} 已存在")
+        classroom.name = name
+
+    if building_id is not None:
+        building = db.query(Building).filter(Building.id == building_id).first()
+        if not building:
+            raise HTTPException(400, "教学楼不存在")
+        classroom.building_id = building_id
 
     classroom.is_fixed_seats = is_fixed_seats
     classroom.can_double_exam = can_double_exam
