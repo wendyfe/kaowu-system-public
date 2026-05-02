@@ -369,6 +369,25 @@
         </div>
     </div>
 
+    <!-- 验收总览弹窗 -->
+    <div class="modal fade" id="acceptanceModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="acceptanceModalTitle">验收总览</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="acceptanceModalBody">
+                    <div class="text-center py-4 text-muted">加载中...</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-danger" id="sealAllBtn">🔒 全部封门</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <footer>
         <div class="container">
             <p class="mb-0">© 2026 考务报名管理系统 - 所有权利保留</p>
@@ -640,6 +659,17 @@
                         openGroupingPanel(item.id, item.exam_name);
                     };
                     tdActions.appendChild(groupLink);
+
+                    // 验收
+                    const acceptLink = document.createElement("a");
+                    acceptLink.href = "#";
+                    acceptLink.className = 'action-link';
+                    acceptLink.textContent = "验收";
+                    acceptLink.onclick = function (e) {
+                        e.preventDefault();
+                        openAcceptancePanel(item.id, item.exam_name);
+                    };
+                    tdActions.appendChild(acceptLink);
 
                     // 删除
                     const delLink = document.createElement("a");
@@ -1462,6 +1492,90 @@ async function saveGroupManually() {
 
 document.getElementById('autoGroupBtn')?.addEventListener('click', triggerAutoGroup);
 document.getElementById('saveGroupBtn')?.addEventListener('click', saveGroupManually);
+
+// ========== 验收总览 ==========
+
+let currentAcceptRecruitId = null;
+
+async function openAcceptancePanel(recruitId, examName) {
+    currentAcceptRecruitId = recruitId;
+    document.getElementById('acceptanceModalTitle').textContent = `验收总览 — ${examName}`;
+    document.getElementById('acceptanceModalBody').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('acceptanceModal')).show();
+    await loadAcceptanceData(recruitId);
+}
+
+async function loadAcceptanceData(recruitId) {
+    try {
+        const res = await fetch(`/api/recruit/${recruitId}/acceptance/overview`);
+        if (!res.ok) throw new Error('加载失败');
+        const data = await res.json();
+        renderAcceptance(data.data || []);
+    } catch (err) {
+        document.getElementById('acceptanceModalBody').innerHTML = '<div class="text-danger text-center py-4">加载失败</div>';
+    }
+}
+
+function renderAcceptance(items) {
+    const container = document.getElementById('acceptanceModalBody');
+    if (!items || items.length === 0) {
+        container.innerHTML = '<div class="text-center py-4 text-muted">暂无数据</div>';
+        return;
+    }
+
+    const zones = {};
+    items.forEach(item => {
+        const z = item.zone_name || '无分区';
+        if (!zones[z]) zones[z] = [];
+        zones[z].push(item);
+    });
+
+    const statusMap = {
+        'pending': { label: '待验收', cls: 'bg-warning text-dark' },
+        'rejected': { label: '已驳回', cls: 'bg-danger' },
+        'passed': { label: '已通过', cls: 'bg-success' },
+        'sealed': { label: '已封门', cls: 'bg-secondary' },
+    };
+
+    let html = '';
+    let totalPassed = 0;
+    for (const [zone, zoneItems] of Object.entries(zones)) {
+        html += `<div class="mb-3"><h5 class="border-bottom pb-1">🏢 ${zone}</h5>`;
+        zoneItems.forEach(item => {
+            const st = statusMap[item.status] || statusMap['pending'];
+            if (item.status === 'passed') totalPassed++;
+            html += `<div class="d-flex justify-content-between align-items-center border-bottom py-2">
+                <div>
+                    <strong>${item.classroom_name}</strong>
+                    <span class="small text-muted ms-2">👤 ${item.members.join('、')}</span>
+                    ${item.note ? `<div class="small text-danger">❌ ${item.note}</div>` : ''}
+                </div>
+                <span class="badge ${st.cls}">${st.label}</span>
+            </div>`;
+        });
+        html += '</div>';
+    }
+    html += `<div class="text-muted small mt-2">共 ${items.length} 间教室，已通过 ${totalPassed} 间</div>`;
+
+    container.innerHTML = html;
+}
+
+document.getElementById('sealAllBtn')?.addEventListener('click', async () => {
+    if (!currentAcceptRecruitId) return;
+    if (!await showConfirm('确认封门', '确定封门吗？所有已通过的教室将被锁定。')) return;
+    const csrf = document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+    try {
+        const res = await fetch(`/api/recruit/${currentAcceptRecruitId}/acceptance/seal`, {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrf }
+        });
+        const data = await res.json();
+        showToast(data.msg || data.detail, data.code === 0 ? 'success' : 'danger');
+        if (data.code === 0) await loadAcceptanceData(currentAcceptRecruitId);
+    } catch (err) {
+        showToast('操作失败', 'danger');
+    }
+});
     </script>
 </body>
 </html>
