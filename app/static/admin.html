@@ -1202,11 +1202,11 @@ async function loadPublishClassroomTree() {
 
                 // Classroom rows
                 const classDiv = document.createElement('div');
-                classDiv.className = 'ms-3';
+                classDiv.className = 'ms-3 d-flex flex-wrap gap-2';
 
                 classrooms.forEach(c => {
                     const row = document.createElement('div');
-                    row.className = 'd-flex align-items-center gap-2 mb-1';
+                    row.className = 'd-inline-flex align-items-center';
 
                     const cb = document.createElement('input');
                     cb.type = 'checkbox';
@@ -1365,11 +1365,11 @@ async function loadEditClassroomTree() {
                 zDiv.appendChild(zCheckDiv);
 
                 const classDiv = document.createElement('div');
-                classDiv.className = 'ms-3';
+                classDiv.className = 'ms-3 d-flex flex-wrap gap-2';
 
                 classrooms.forEach(c => {
                     const row = document.createElement('div');
-                    row.className = 'd-flex align-items-center gap-2 mb-1';
+                    row.className = 'd-inline-flex align-items-center';
 
                     const cb = document.createElement('input');
                     cb.type = 'checkbox';
