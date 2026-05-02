@@ -1367,6 +1367,7 @@ function renderGrouping(groups) {
                     <div class="card-body py-2">
                         <div class="small mb-1">👤 ${memberNames}</div>
                         <div class="small text-muted">🏫 ${classroomNames || '未分配教室'}</div>
+                        <div class="mt-1"><span class="badge bg-info bg-opacity-10 text-info small">布置进度: 查看详情</span></div>
                     </div>
                 </div>
             </div>`;
@@ -1407,6 +1408,13 @@ async function triggerAutoGroup() {
         const data = await res.json();
         if (data.code === 0) {
             showToast('自动分组成功', 'success');
+            // 自动初始化布置清单
+            try {
+                await fetch(`/api/recruit/${currentGroupingRecruitId}/init-tasks`, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': csrf }
+                });
+            } catch (_) {}
             await loadGroupingData(currentGroupingRecruitId);
         } else {
             showToast(data.detail || '自动分组失败', 'danger');
