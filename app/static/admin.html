@@ -1329,7 +1329,7 @@ async function loadPublishClassroomTree() {
                 zCb.addEventListener('change', function() {
                     const childCbs = this.closest('.mb-2').querySelectorAll('.classroom-checkbox-publish');
                     childCbs.forEach(childCb => {
-                        const select = childCb.closest('.d-flex').querySelector('select');
+                        const select = childCb.closest('.border.rounded').querySelector('select');
                         if (this.checked) {
                             childCb.checked = true;
                             select.disabled = false;
@@ -1492,7 +1492,7 @@ async function loadEditClassroomTree() {
                 zCb.addEventListener('change', function() {
                     const childCbs = this.closest('.mb-2').querySelectorAll('.classroom-checkbox-edit');
                     childCbs.forEach(childCb => {
-                        const select = childCb.closest('.d-flex').querySelector('select');
+                        const select = childCb.closest('.border.rounded').querySelector('select');
                         if (this.checked) {
                             childCb.checked = true;
                             select.disabled = false;
