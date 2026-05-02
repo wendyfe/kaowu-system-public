@@ -227,14 +227,8 @@
                 <!-- 选择考场场地 -->
                 <div class="mt-4 pt-3 border-top">
                     <h5 class="mb-3">选择考场场地</h5>
-                    <div class="mb-3">
-                        <label class="form-label">教学楼</label>
-                        <select id="publishBuilding" class="form-select">
-                            <option value="">请选择教学楼</option>
-                        </select>
-                    </div>
-                    <div id="publishClassroomList" class="mb-2">
-                        <div class="text-muted small py-2">请先选择教学楼</div>
+                    <div id="publishClassroomTree" class="mb-2">
+                        <div class="text-muted small py-2">加载中...</div>
                     </div>
                     <div class="d-flex justify-content-between align-items-center pt-2 mt-2">
                         <span id="publishSelectionCount" class="text-muted small">已选 0 间教室 → 0 个考场</span>
@@ -909,7 +903,7 @@
         loadRecruitList();
 
         // 初始化考场选择
-        loadPublishBuildings();
+        loadPublishClassroomTree();
 
         // ========== 教室管理 ==========
 
@@ -1169,82 +1163,145 @@
 let publishSelections = {};   // { classroom_id: 'single'|'double' }
 let editSelections = {};      // same structure for edit mode
 
-// 发布表单 - 加载教学楼
-async function loadPublishBuildings() {
+// 发布表单 - 加载考场树
+async function loadPublishClassroomTree() {
     try {
-        const res = await fetch('/api/buildings');
+        const res = await fetch('/api/classrooms');
         const list = await res.json();
-        const select = document.getElementById('publishBuilding');
-        select.innerHTML = '<option value="">请选择教学楼</option>';
-        list.forEach(b => {
-            const opt = document.createElement('option');
-            opt.value = b.id;
-            opt.textContent = b.name;
-            select.appendChild(opt);
-        });
-    } catch (err) {
-        console.error('加载教学楼失败', err);
-    }
-}
-
-// 发布表单 - 加载教室
-async function loadPublishClassrooms(buildingId) {
-    try {
-        const url = buildingId ? `/api/classrooms?building_id=${buildingId}` : '/api/classrooms';
-        const res = await fetch(url);
-        const list = await res.json();
-        const container = document.getElementById('publishClassroomList');
+        const container = document.getElementById('publishClassroomTree');
         container.innerHTML = '';
-        if (list.length === 0) {
-            container.innerHTML = '<div class="text-muted small py-2">该教学楼暂无教室</div>';
-            return;
-        }
+
+        // Group: building_name → zone → classrooms
+        const buildings = {};
         list.forEach(c => {
-            const div = document.createElement('div');
-            div.className = 'form-check form-check-inline mb-2';
-            div.style.minWidth = '180px';
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.className = 'form-check-input';
-            cb.value = c.id;
-            cb.id = `p_cb_${c.id}`;
-            cb.dataset.canDouble = c.can_double_exam;
-            const label = document.createElement('label');
-            label.className = 'form-check-label';
-            label.htmlFor = `p_cb_${c.id}`;
-            label.textContent = c.name + (c.is_fixed_seats ? ' 🪑' : '');
-            div.appendChild(cb);
-            div.appendChild(label);
-            const ms = document.createElement('select');
-            ms.className = 'form-select form-select-sm d-inline-block ms-1';
-            ms.style.width = '95px';
-            ms.disabled = true;
-            ms.innerHTML = `<option value="single">单考场</option><option value="double">${c.can_double_exam ? '双考场' : '双考场(不可用)'}</option>`;
-            if (!c.can_double_exam) ms.querySelector('[value="double"]').disabled = true;
-            div.appendChild(ms);
-            cb.addEventListener('change', function() {
-                ms.disabled = !this.checked;
-                if (this.checked) {
-                    const def = c.can_double_exam ? 'double' : 'single';
-                    ms.value = def;
-                    publishSelections[c.id] = def;
-                } else {
-                    delete publishSelections[c.id];
-                }
-                updatePublishCount();
-            });
-            ms.addEventListener('change', function() {
-                if (cb.checked) { publishSelections[c.id] = this.value; updatePublishCount(); }
-            });
-            if (publishSelections[c.id] !== undefined) {
-                cb.checked = true;
-                ms.disabled = false;
-                ms.value = publishSelections[c.id];
-            }
-            container.appendChild(div);
+            const bn = c.building_name;
+            if (!buildings[bn]) buildings[bn] = { building_name: bn, zones: {} };
+            const zone = c.zone || '未分区';
+            if (!buildings[bn].zones[zone]) buildings[bn].zones[zone] = [];
+            buildings[bn].zones[zone].push(c);
         });
+
+        for (const [bname, building] of Object.entries(buildings)) {
+            const bDiv = document.createElement('div');
+            bDiv.className = 'mb-3';
+
+            const bTitle = document.createElement('div');
+            bTitle.className = 'fw-bold mb-1';
+            bTitle.textContent = bname;
+            bDiv.appendChild(bTitle);
+
+            for (const [zone, classrooms] of Object.entries(building.zones)) {
+                const zDiv = document.createElement('div');
+                zDiv.className = 'ms-3 mb-2';
+
+                // Zone checkbox row
+                const zCheckDiv = document.createElement('div');
+                zCheckDiv.className = 'mb-1';
+                const zCb = document.createElement('input');
+                zCb.type = 'checkbox';
+                zCb.className = 'form-check-input me-1 zone-checkbox-publish';
+                const zLabel = document.createElement('strong');
+                zLabel.textContent = zone;
+                zCheckDiv.appendChild(zCb);
+                zCheckDiv.appendChild(zLabel);
+                zDiv.appendChild(zCheckDiv);
+
+                // Classroom rows
+                const classDiv = document.createElement('div');
+                classDiv.className = 'ms-3';
+
+                classrooms.forEach(c => {
+                    const row = document.createElement('div');
+                    row.className = 'd-flex align-items-center gap-2 mb-1';
+
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.className = 'form-check-input classroom-checkbox-publish';
+                    cb.value = c.id;
+                    cb.dataset.canDouble = c.can_double_exam;
+
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'small';
+                    nameSpan.textContent = c.name + (c.is_fixed_seats ? ' 🛏️' : '');
+
+                    const ms = document.createElement('select');
+                    ms.className = 'form-select form-select-sm';
+                    ms.style.width = '100px';
+                    ms.disabled = true;
+                    ms.innerHTML = '<option value="single">单考场</option><option value="double">' + (c.can_double_exam ? '双考场' : '双考场(不可用)') + '</option>';
+                    if (!c.can_double_exam) ms.querySelector('[value="double"]').disabled = true;
+
+                    row.appendChild(cb);
+                    row.appendChild(nameSpan);
+                    row.appendChild(ms);
+                    classDiv.appendChild(row);
+
+                    // Restore selection state
+                    if (publishSelections[c.id] !== undefined) {
+                        cb.checked = true;
+                        ms.disabled = false;
+                        ms.value = publishSelections[c.id];
+                    }
+
+                    // Classroom checkbox change
+                    cb.addEventListener('change', function() {
+                        ms.disabled = !this.checked;
+                        if (this.checked) {
+                            ms.value = c.can_double_exam ? 'double' : 'single';
+                            publishSelections[c.id] = ms.value;
+                        } else {
+                            delete publishSelections[c.id];
+                        }
+                        updatePublishCount();
+                        // Uncheck zone if any child unchecked
+                        const zoneCb = this.closest('.ms-3').parentElement.querySelector('.zone-checkbox-publish');
+                        if (!this.checked && zoneCb) zoneCb.checked = false;
+                    });
+
+                    // Mode dropdown change
+                    ms.addEventListener('change', function() {
+                        if (cb.checked) {
+                            publishSelections[c.id] = this.value;
+                            updatePublishCount();
+                        }
+                    });
+
+                    // Helper for zone batch selection
+                    cb._zoneChanged = function(mode) {
+                        cb.checked = true;
+                        ms.disabled = false;
+                        ms.value = mode;
+                        publishSelections[c.id] = mode;
+                    };
+                });
+
+                zDiv.appendChild(classDiv);
+
+                // Zone checkbox: select/deselect all in zone
+                zCb.addEventListener('change', function() {
+                    const childCbs = this.closest('.mb-2').querySelectorAll('.classroom-checkbox-publish');
+                    childCbs.forEach(childCb => {
+                        if (this.checked) {
+                            const mode = childCb.dataset.canDouble === 'true' ? 'double' : 'single';
+                            childCb._zoneChanged(mode);
+                        } else {
+                            childCb.checked = false;
+                            childCb.closest('.d-flex').querySelector('select').disabled = true;
+                            delete publishSelections[childCb.value];
+                        }
+                    });
+                    updatePublishCount();
+                });
+
+                bDiv.appendChild(zDiv);
+            }
+
+            container.appendChild(bDiv);
+        }
+
+        updatePublishCount();
     } catch (err) {
-        document.getElementById('publishClassroomList').innerHTML = '<div class="text-danger small">加载失败</div>';
+        document.getElementById('publishClassroomTree').innerHTML = '<div class="text-danger small">加载教室数据失败</div>';
     }
 }
 
@@ -1260,9 +1317,6 @@ function updatePublishCount() {
     document.getElementById('publishExamModes').value = modes.join(',');
 }
 
-document.getElementById('publishBuilding')?.addEventListener('change', function() {
-    loadPublishClassrooms(this.value);
-});
 
 // 编辑表单 - 加载教学楼
 async function loadEditBuildings(selectedId) {
