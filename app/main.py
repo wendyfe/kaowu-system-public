@@ -108,6 +108,23 @@ class VerifyCode(Base):
     create_time = Column(DateTime, default=now_beijing)
     is_used = Column(Boolean, default=False)
 
+# ==================== 考场基础数据模型 ====================
+class Building(Base):
+    """教学楼"""
+    __tablename__ = "buildings"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True, nullable=False)  # 如"树人楼""综合楼"
+
+
+class Classroom(Base):
+    """教室"""
+    __tablename__ = "classrooms"
+    id = Column(Integer, primary_key=True)
+    building_id = Column(Integer, nullable=False)
+    name = Column(String(50), nullable=False)  # 如"B101""102"
+    is_fixed_seats = Column(Boolean, default=False)   # True=固定桌椅
+    can_double_exam = Column(Boolean, default=False)  # True=具备双考场条件
+
 Base.metadata.create_all(bind=engine)
 
 def get_db():
@@ -160,6 +177,21 @@ def _cleanup_rate_limits():
         _RATE_LIMITS[key] = [t for t in _RATE_LIMITS[key] if now - t < 120]
         if not _RATE_LIMITS[key]:
             del _RATE_LIMITS[key]
+
+# ==================== 考场工具函数 ====================
+
+def detect_zone(classroom_name: str):
+    """从教室名称推导"栋"信息。
+    规则：
+    - 首字母为英文字母 → 返回该字母 + "栋"（B101 → B栋）
+    - 首字母为数字 → 返回 None（综合楼 101 → 无分区）
+    """
+    if not classroom_name:
+        return None
+    first_char = classroom_name.strip()[0]
+    if 'A' <= first_char.upper() <= 'Z':
+        return f"{first_char.upper()}栋"
+    return None
 
 # 生成6位数字验证码
 def generate_verify_code():
