@@ -345,12 +345,30 @@
                     <h5 class="modal-title" id="groupingModalTitle">分组排班</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body" id="groupingModalBody">
-                    <div class="text-center py-4 text-muted">加载中...</div>
+                <div class="modal-body">
+                    <ul class="nav nav-tabs mb-3" id="groupingTabs" role="tablist">
+                        <li class="nav-item"><button class="nav-link active" id="tab-general-tab" data-bs-toggle="tab" data-bs-target="#tab-general" type="button">①总负责人</button></li>
+                        <li class="nav-item"><button class="nav-link" id="tab-supervisor-tab" data-bs-toggle="tab" data-bs-target="#tab-supervisor" type="button">②楼栋负责人</button></li>
+                        <li class="nav-item"><button class="nav-link" id="tab-groups-tab" data-bs-toggle="tab" data-bs-target="#tab-groups" type="button">③拖拽分组</button></li>
+                        <li class="nav-item"><button class="nav-link" id="tab-classrooms-tab" data-bs-toggle="tab" data-bs-target="#tab-classrooms" type="button">④分配教室</button></li>
+                    </ul>
+                    <div class="tab-content">
+                        <div class="tab-pane fade show active" id="tab-general">
+                            <div id="tabGeneralContent"><div class="text-center py-4 text-muted">加载中...</div></div>
+                        </div>
+                        <div class="tab-pane fade" id="tab-supervisor">
+                            <div id="tabSupervisorContent"><div class="text-center py-4 text-muted">加载中...</div></div>
+                        </div>
+                        <div class="tab-pane fade" id="tab-groups">
+                            <div id="tabGroupsContent"><div class="text-center py-4 text-muted">加载中...</div></div>
+                        </div>
+                        <div class="tab-pane fade" id="tab-classrooms">
+                            <div id="tabClassroomsContent"><div class="text-center py-4 text-muted">加载中...</div></div>
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" id="autoGroupBtn">🔄 重新自动分组</button>
-                    <button type="button" class="btn btn-custom" id="saveGroupBtn">💾 保存分组</button>
+                    <button type="button" class="btn btn-custom" id="finalizeGroupBtn">✅ 确认分组并创建任务</button>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
                 </div>
             </div>
@@ -1514,15 +1532,20 @@ function updateEditCount() {
     document.getElementById('editExamModes').value = modes.join(',');
 }
 
-// ========== 分组排班 ==========
+// ========== 手动分组排班（4 标签页） ==========
 
 let currentGroupingRecruitId = null;
-let groupingSortables = [];
+let groupingData = null;
+let poolSortable = null;
+let groupsSortables = [];
 
 async function openGroupingPanel(recruitId, examName) {
     currentGroupingRecruitId = recruitId;
     document.getElementById('groupingModalTitle').textContent = `分组排班 — ${examName}`;
-    document.getElementById('groupingModalBody').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
+    document.getElementById('tabGeneralContent').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
+    document.getElementById('tabSupervisorContent').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
+    document.getElementById('tabGroupsContent').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
+    document.getElementById('tabClassroomsContent').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
 
     const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('groupingModal'));
     modal.show();
@@ -1531,153 +1554,339 @@ async function openGroupingPanel(recruitId, examName) {
 
 async function loadGroupingData(recruitId) {
     try {
-        const res = await fetch(`/api/recruit/${recruitId}/groups`);
+        const res = await fetch(`/api/recruit/${recruitId}/manual-grouping-data`);
         if (!res.ok) throw new Error('加载失败');
-        const data = await res.json();
-        renderGrouping(data.data || []);
+        groupingData = await res.json();
+        renderGeneralTab();
+        renderSupervisorTab();
+        renderGroupsTab();
+        renderClassroomsTab();
     } catch (err) {
-        document.getElementById('groupingModalBody').innerHTML = '<div class="text-danger text-center py-4">加载分组数据失败</div>';
+        document.getElementById('tabGeneralContent').innerHTML = '<div class="text-danger text-center py-4">加载分组数据失败</div>';
     }
 }
 
-function renderGrouping(groups) {
-    const container = document.getElementById('groupingModalBody');
-    groupingSortables.forEach(s => s.destroy());
-    groupingSortables = [];
+function renderGeneralTab() {
+    const container = document.getElementById('tabGeneralContent');
+    const data = groupingData;
+    const current = data.registrations.find(r => r.id === data.general_supervisor_id);
+    let html = '';
+    if (current) {
+        html += `<div class="alert alert-success py-2">当前总负责人：<strong>${current.name}</strong>（${current.gender}）<button class="btn btn-sm btn-outline-danger ms-2" onclick="removeGeneralSupervisor()">移除</button></div>`;
+    } else {
+        html += `<div class="alert alert-warning py-2">⚠️ 尚未设置总负责人，建议指定一位有经验的人员担任</div>`;
+    }
+    html += `<div class="mb-2"><strong>从报名人员中选 1 人设为总负责人：</strong></div>`;
+    html += `<div class="d-flex flex-wrap gap-2">`;
+    data.registrations.forEach(r => {
+        if (r.id === data.general_supervisor_id) return;
+        html += `<div class="border rounded p-2 text-center" style="width:140px;background:#f8f9fa">`;
+        html += `<div><strong>${r.name}</strong></div>`;
+        html += `<div class="small text-muted">${r.gender}${r.has_experience ? ' ⭐有经验' : ''}</div>`;
+        html += `<button class="btn btn-sm btn-outline-primary mt-1" onclick="setGeneralSupervisor(${r.id})">设为总负责人</button>`;
+        html += `</div>`;
+    });
+    html += `</div>`;
+    container.innerHTML = html;
+}
 
-    if (!groups || groups.length === 0) {
-        container.innerHTML = `
-            <div class="text-center py-4">
-                <div class="text-muted mb-3">暂无分组数据，请先点击「自动分组」</div>
-                <button class="btn btn-custom" onclick="triggerAutoGroup()">🔄 自动分组</button>
-            </div>`;
+async function setGeneralSupervisor(regId) {
+    const formData = new FormData();
+    formData.append('registration_id', regId);
+    const csrf = getCsrf();
+    try {
+        const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/general-supervisor`, {
+            method: 'PUT', body: formData, headers: { 'X-CSRF-Token': csrf }
+        });
+        const data = await res.json();
+        showToast(data.msg, 'success');
+        if (data.code === 0) await loadGroupingData(currentGroupingRecruitId);
+    } catch (err) { showToast('操作失败', 'danger'); }
+}
+
+async function removeGeneralSupervisor() {
+    const formData = new FormData();
+    formData.append('registration_id', '');
+    const csrf = getCsrf();
+    try {
+        const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/general-supervisor`, {
+            method: 'PUT', body: formData, headers: { 'X-CSRF-Token': csrf }
+        });
+        const data = await res.json();
+        showToast(data.msg, 'success');
+        if (data.code === 0) await loadGroupingData(currentGroupingRecruitId);
+    } catch (err) { showToast('操作失败', 'danger'); }
+}
+
+function renderSupervisorTab() {
+    const container = document.getElementById('tabSupervisorContent');
+    const data = groupingData;
+
+    const zones = [...new Set(data.classrooms.map(c => c.zone).filter(z => z))];
+    if (zones.length === 0) {
+        container.innerHTML = '<div class="text-muted py-4">暂无楼栋分区数据</div>';
         return;
     }
 
-    // 按 zone 分组
-    const zones = {};
-    groups.forEach(g => {
-        const z = g.zone_name || '无分区';
-        if (!zones[z]) zones[z] = [];
-        zones[z].push(g);
+    const candidates = data.registrations.filter(r => r.id !== data.general_supervisor_id);
+    const supervisorMap = {};
+    data.supervisors.forEach(s => { supervisorMap[s.zone_name] = s.registration_id; });
+
+    let html = `<div class="alert alert-info py-2">同一人可以负责多栋。跳过此步骤可能会影响验收流程。</div>`;
+    html += `<div class="row g-3">`;
+
+    zones.forEach(zone => {
+        const currentId = supervisorMap[zone] || '';
+        html += `<div class="col-md-4"><div class="border rounded p-3">`;
+        html += `<div class="fw-bold mb-2">${zone}</div>`;
+        html += `<select class="form-select form-select-sm zone-supervisor-select" data-zone="${zone}">`;
+        html += `<option value="">（不指定）</option>`;
+        candidates.forEach(r => {
+            const selected = r.id === currentId ? 'selected' : '';
+            html += `<option value="${r.id}" ${selected}>${r.name}（${r.gender}${r.has_experience ? '⭐' : ''}）</option>`;
+        });
+        html += `</select>`;
+        if (candidates.find(r => r.id === currentId)) {
+            html += `<div class="small text-muted mt-1">当前：${candidates.find(r => r.id === currentId).name}</div>`;
+        }
+        html += `</div></div>`;
     });
 
-    let html = '<div class="sortable-container">';
-    for (const [zone, zoneGroups] of Object.entries(zones)) {
-        html += `<div class="mb-4"><h5 class="mb-2 border-bottom pb-1">🏢 ${zone}</h5>`;
-        html += `<div class="row g-2 sortable-zone" data-zone="${zone}">`;
+    html += `</div>`;
+    html += `<button class="btn btn-custom mt-3" onclick="saveBuildingSupervisors()">保存楼栋负责人</button>`;
+    container.innerHTML = html;
+}
 
-        zoneGroups.forEach((g, idx) => {
-            const memberNames = g.members.map(m =>
-                `${m.name}(${m.gender})${m.has_experience ? '⭐' : ''}`
-            ).join('、');
-            const classroomNames = g.classrooms.map(c => c.classroom_name).join('、');
-            const supBadge = g.is_supervisor ? ' <span class="badge bg-warning text-dark">楼栋负责人</span>' : '';
+async function saveBuildingSupervisors() {
+    const selects = document.querySelectorAll('.zone-supervisor-select');
+    const supervisors = [];
+    selects.forEach(sel => {
+        const val = sel.value;
+        if (val) {
+            supervisors.push({ zone_name: sel.dataset.zone, registration_id: parseInt(val) });
+        }
+    });
 
-            html += `<div class="col-md-6 col-lg-4" data-group-id="${g.id}">
-                <div class="card border shadow-sm draggable-group">
-                    <div class="card-header py-2 d-flex justify-content-between align-items-center" style="cursor:grab">
-                        <span class="fw-bold small">第${idx+1}组${supBadge}</span>
-                        <span class="badge bg-light text-dark">${zone}</span>
-                    </div>
-                    <div class="card-body py-2">
-                        <div class="small mb-1">👤 ${memberNames}</div>
-                        <div class="small text-muted">🏫 ${classroomNames || '未分配教室'}</div>
-                        <div class="mt-1"><span class="badge bg-info bg-opacity-10 text-info small">布置进度: 查看详情</span></div>
-                    </div>
-                </div>
-            </div>`;
+    const csrf = getCsrf();
+    try {
+        const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/building-supervisors`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body: JSON.stringify({ supervisors }),
         });
+        const data = await res.json();
+        showToast(data.msg, 'success');
+        if (data.code === 0) await loadGroupingData(currentGroupingRecruitId);
+    } catch (err) { showToast('保存失败', 'danger'); }
+}
 
+function renderGroupsTab() {
+    const container = document.getElementById('tabGroupsContent');
+    if (poolSortable) poolSortable.destroy();
+    groupsSortables.forEach(s => s.destroy());
+    groupsSortables = [];
+    const data = groupingData;
+
+    const excludedIds = new Set();
+    if (data.general_supervisor_id) excludedIds.add(data.general_supervisor_id);
+    data.supervisors.forEach(s => excludedIds.add(s.registration_id));
+
+    const groupedIds = new Set();
+    data.groups.forEach(g => g.member_ids.forEach(mid => groupedIds.add(mid)));
+
+    const ungrouped = data.registrations.filter(r => !excludedIds.has(r.id) && !groupedIds.has(r.id));
+
+    let html = `<div class="row">`;
+    html += `<div class="col-md-3">`;
+    html += `<div class="fw-bold mb-2">待分组（${ungrouped.length}人）</div>`;
+    html += `<div id="groupPool" class="border rounded p-2" style="min-height:200px">`;
+    ungrouped.forEach(r => {
+        html += `<div class="border rounded p-2 mb-1 bg-light" data-reg-id="${r.id}" style="cursor:grab">${r.name}（${r.gender}${r.has_experience ? ' ⭐' : ''}）</div>`;
+    });
+    html += `</div></div>`;
+
+    html += `<div class="col-md-9">`;
+    html += `<div class="d-flex justify-content-between align-items-center mb-2">`;
+    html += `<span class="fw-bold">分组（${data.groups.length}组）</span>`;
+    html += `<button class="btn btn-sm btn-outline-primary" onclick="createNewGroup()">+ 新增组</button>`;
+    html += `</div>`;
+    html += `<div id="groupsArea" class="d-flex flex-wrap gap-2">`;
+
+    data.groups.forEach((g, idx) => {
+        html += `<div class="border rounded p-2" style="width:220px;min-height:100px;background:#f8f9fa" data-group-id="${g.id}">`;
+        html += `<div class="d-flex justify-content-between align-items-center mb-1"><strong>第${idx+1}组</strong><button class="btn btn-sm btn-outline-danger py-0" onclick="deleteGroup(${g.id})">×</button></div>`;
+        html += `<div class="group-members-area" data-group-id="${g.id}" style="min-height:50px">`;
+        g.member_ids.forEach(mid => {
+            const r = data.registrations.find(reg => reg.id === mid);
+            if (r) {
+                html += `<div class="border rounded p-1 mb-1 bg-white small" data-reg-id="${r.id}" style="cursor:grab">${r.name}（${r.gender}${r.has_experience ? ' ⭐' : ''}）</div>`;
+            }
+        });
         html += `</div></div>`;
-    }
-    html += '</div>';
-    html += `<div class="text-muted small mt-2">💡 拖拽卡片可在同区域内调整排序，调整后点击「保存分组」</div>`;
+    });
+
+    html += `</div></div></div>`;
 
     container.innerHTML = html;
 
-    // 初始化 Sortable
-    document.querySelectorAll('.sortable-zone').forEach(el => {
-        const s = new Sortable(el, {
-            animation: 150,
-            handle: '.draggable-group',
-            ghostClass: 'bg-light',
-            onEnd: function() {
-                showToast('分组顺序已调整，记得点击「保存分组」', 'info');
-            }
+    poolSortable = new Sortable(document.getElementById('groupPool'), {
+        group: 'grouping', animation: 150, sort: false,
+    });
+
+    document.querySelectorAll('.group-members-area').forEach(area => {
+        const s = new Sortable(area, {
+            group: 'grouping', animation: 150,
+            onEnd: function() { saveAllGroupMembers(); }
         });
-        groupingSortables.push(s);
+        groupsSortables.push(s);
     });
 }
 
-async function triggerAutoGroup() {
-    if (!currentGroupingRecruitId) return;
-    const csrf = document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
-    const container = document.getElementById('groupingModalBody');
-    container.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><div class="mt-2 text-muted">正在自动分组...</div></div>';
-
-    try {
-        const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/auto-group`, {
-            method: 'POST',
-            headers: { 'X-CSRF-Token': csrf }
+async function saveAllGroupMembers() {
+    const csrf = getCsrf();
+    document.querySelectorAll('.group-members-area').forEach(area => {
+        const groupId = parseInt(area.dataset.groupId);
+        const memberIds = [];
+        area.querySelectorAll('[data-reg-id]').forEach(el => {
+            memberIds.push(parseInt(el.dataset.regId));
         });
-        const data = await res.json();
-        if (data.code === 0) {
-            showToast('自动分组成功', 'success');
-            // 自动初始化布置清单
-            try {
-                await fetch(`/api/recruit/${currentGroupingRecruitId}/init-tasks`, {
-                    method: 'POST',
-                    headers: { 'X-CSRF-Token': csrf }
-                });
-            } catch (_) {}
-            await loadGroupingData(currentGroupingRecruitId);
-        } else {
-            showToast(data.detail || '自动分组失败', 'danger');
-            container.innerHTML = '<div class="text-center py-4"><div class="text-danger mb-3">' + (data.detail || '自动分组失败') + '</div><button class="btn btn-custom" onclick="triggerAutoGroup()">重试</button></div>';
-        }
-    } catch (err) {
-        showToast('网络错误，自动分组失败', 'danger');
-        container.innerHTML = '<div class="text-center py-4"><div class="text-danger mb-3">网络错误</div><button class="btn btn-custom" onclick="triggerAutoGroup()">重试</button></div>';
-    }
+        fetch(`/api/recruit/${currentGroupingRecruitId}/groups/${groupId}/members`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body: JSON.stringify({ member_ids: memberIds }),
+        }).catch(() => {});
+    });
+    showToast('分组已保存', 'success');
 }
 
-async function saveGroupManually() {
-    if (!currentGroupingRecruitId) return;
-    const csrf = document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
-
-    // 收集当前排序
-    const groups = [];
-    let sortIndex = 0;
-    document.querySelectorAll('.sortable-zone').forEach(zoneEl => {
-        const zone = zoneEl.dataset.zone || '';
-        zoneEl.querySelectorAll('[data-group-id]').forEach(col => {
-            const groupId = col.dataset.groupId;
-            // 这里简化处理：重建所有分组
-            // 在实际应用中需要更复杂的拖拽逻辑
-            groups.push({ group_id: parseInt(groupId) });
-        });
-    });
-
+async function createNewGroup() {
+    const csrf = getCsrf();
     try {
-        const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/save-groups`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrf
-            },
-            body: JSON.stringify({ groups: [] }) // 简化：不支持跨组拖拽时保存
+        const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/groups`, {
+            method: 'POST', headers: { 'X-CSRF-Token': csrf }
         });
         const data = await res.json();
-        showToast(data.msg || '保存成功', data.code === 0 ? 'success' : 'danger');
         if (data.code === 0) await loadGroupingData(currentGroupingRecruitId);
-    } catch (err) {
-        showToast('保存失败', 'danger');
-    }
+    } catch (err) { showToast('创建失败', 'danger'); }
 }
 
-document.getElementById('autoGroupBtn')?.addEventListener('click', triggerAutoGroup);
-document.getElementById('saveGroupBtn')?.addEventListener('click', saveGroupManually);
+async function deleteGroup(groupId) {
+    if (!await showConfirm('确认删除', '确定删除此组？')) return;
+    const csrf = getCsrf();
+    try {
+        const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/groups/${groupId}`, {
+            method: 'DELETE', headers: { 'X-CSRF-Token': csrf }
+        });
+        const data = await res.json();
+        showToast(data.msg, data.code === 0 ? 'success' : 'danger');
+        if (data.code === 0) await loadGroupingData(currentGroupingRecruitId);
+    } catch (err) { showToast('删除失败', 'danger'); }
+}
+
+function renderClassroomsTab() {
+    const container = document.getElementById('tabClassroomsContent');
+    const data = groupingData;
+
+    if (!data.groups || data.groups.length === 0) {
+        container.innerHTML = '<div class="text-muted py-4">暂无分组，请先在「拖拽分组」中创建组</div>';
+        return;
+    }
+    if (data.classrooms.length === 0) {
+        container.innerHTML = '<div class="text-muted py-4">暂无考场数据</div>';
+        return;
+    }
+
+    const zoneClassrooms = {};
+    data.classrooms.forEach(c => {
+        if (!zoneClassrooms[c.zone]) zoneClassrooms[c.zone] = [];
+        zoneClassrooms[c.zone].push(c);
+    });
+
+    // Calculate taken classroom ids across ALL groups
+    const takenByGroup = {};
+    data.groups.forEach(g => {
+        g.classroom_rc_ids.forEach(rid => {
+            takenByGroup[rid] = (takenByGroup[rid] || 0) + 1;
+        });
+    });
+
+    let html = '';
+    data.groups.forEach((g, idx) => {
+        const members = g.member_ids.map(mid => {
+            const r = data.registrations.find(reg => reg.id === mid);
+            return r ? r.name : '未知';
+        }).join('、');
+
+        const assignedIds = new Set(g.classroom_rc_ids);
+        let totalExam = 0;
+
+        html += `<div class="border rounded p-3 mb-3">`;
+        html += `<div class="fw-bold mb-2">第${idx+1}组：${members || '（空组）'}</div>`;
+
+        for (const [zone, classrooms] of Object.entries(zoneClassrooms)) {
+            html += `<div class="ms-2 mb-1"><span class="text-muted small">${zone}</span><div class="d-flex flex-wrap gap-1 mt-1">`;
+            classrooms.forEach(c => {
+                const checked = assignedIds.has(c.rc_id) ? 'checked' : '';
+                const isTakenByOther = takenByGroup[c.rc_id] > (assignedIds.has(c.rc_id) ? 1 : 0);
+                const disabled = isTakenByOther ? 'disabled' : '';
+                if (assignedIds.has(c.rc_id)) totalExam += c.exam_count;
+                html += `<div class="border rounded p-1 text-center ${disabled ? 'bg-light text-muted' : 'bg-white'}" style="width:110px">`;
+                html += `<div class="form-check mb-0 justify-content-center">`;
+                html += `<input type="checkbox" class="form-check-input group-classroom-cb" data-group-id="${g.id}" data-rc-id="${c.rc_id}" ${checked} ${disabled}>`;
+                html += `<label class="form-check-label small">${c.name}</label></div>`;
+                html += `<div class="small text-muted">${c.exam_count}考场</div></div>`;
+            });
+            html += `</div></div>`;
+        }
+
+        html += `<div class="small text-muted mt-1">已分配 ${assignedIds.size} 间教室 → ${totalExam} 个考场</div>`;
+        html += `</div>`;
+    });
+
+    html += `<button class="btn btn-custom" onclick="saveAllClassroomAssignments()">保存教室分配</button>`;
+    container.innerHTML = html;
+}
+
+async function saveAllClassroomAssignments() {
+    const csrf = getCsrf();
+    const groupMap = {};
+    document.querySelectorAll('.group-classroom-cb:checked').forEach(cb => {
+        const gid = parseInt(cb.dataset.groupId);
+        if (!groupMap[gid]) groupMap[gid] = [];
+        groupMap[gid].push(parseInt(cb.dataset.rcId));
+    });
+
+    for (const [gid, rcIds] of Object.entries(groupMap)) {
+        try {
+            await fetch(`/api/recruit/${currentGroupingRecruitId}/groups/${gid}/classrooms`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+                body: JSON.stringify({ rc_ids: rcIds }),
+            });
+        } catch (err) { /* per-group error */ }
+    }
+    showToast('教室分配已保存', 'success');
+}
+
+// Utility
+function getCsrf() {
+    return document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+}
+
+// Finalize button
+document.getElementById('finalizeGroupBtn')?.addEventListener('click', async () => {
+    if (!currentGroupingRecruitId) return;
+    if (!await showConfirm('确认分组', '确定完成分组？这将创建布置清单和验收记录。')) return;
+    const csrf = getCsrf();
+    try {
+        const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/finalize-grouping`, {
+            method: 'POST', headers: { 'X-CSRF-Token': csrf }
+        });
+        const data = await res.json();
+        showToast(data.msg || data.detail, data.code === 0 ? 'success' : 'danger');
+        if (data.code === 0) bootstrap.Modal.getInstance(document.getElementById('groupingModal')).hide();
+    } catch (err) { showToast('操作失败', 'danger'); }
+});
 
 // ========== 验收总览 ==========
 
