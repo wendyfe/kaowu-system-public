@@ -310,6 +310,15 @@ STANDARD_SETUP_ITEMS = [
     ("self_check", "自查（对照标准逐项确认）", False),
 ]
 
+# 考后恢复清单（5项）
+RECOVERY_ITEMS = [
+    ("return_chairs", "将门外椅子搬回室内", False),
+    ("remove_door_post", "撕除门帖（不留痕迹）", False),
+    ("remove_seat_labels", "撕除座位贴", False),
+    ("remove_forbidden_sign", "撕除禁带物品标识", False),
+    ("clean_tape", "清理胶带残留", False),
+]
+
 
 def init_task_progress(recruit_id: int, db: Session):
     """为已分组的教室创建布置清单进度记录"""
@@ -360,6 +369,33 @@ def init_acceptance_records(recruit_id: int, db: Session):
                 recruitment_classroom_id=rc.id,
                 status="pending",
             ))
+    db.commit()
+
+
+def init_recovery_tasks(recruit_id: int, db: Session):
+    """为已封门的考场创建恢复任务"""
+    rcs = db.query(RecruitmentClassroom).filter(
+        RecruitmentClassroom.recruitment_id == recruit_id
+    ).all()
+    if not rcs:
+        return
+
+    rc_ids = [rc.id for rc in rcs]
+    db.query(TaskProgress).filter(
+        TaskProgress.recruitment_classroom_id.in_(rc_ids),
+        TaskProgress.task_type == "recovery"
+    ).delete(synchronize_session=False)
+
+    for rc in rcs:
+        for item_key, item_name, _ in RECOVERY_ITEMS:
+            tp = TaskProgress(
+                recruitment_classroom_id=rc.id,
+                item_key=item_key,
+                item_name=item_name,
+                task_type="recovery",
+            )
+            db.add(tp)
+
     db.commit()
 
 
@@ -1786,6 +1822,143 @@ async def acceptance_overview(request: Request, recruit_id: int, db: Session = D
                 "members": [m.name for m in members],
                 "status": record.status if record else "pending",
                 "note": record.note if record else "",
+            })
+
+    return {"code": 0, "data": result}
+
+
+@app.post("/api/recruit/{recruit_id}/init-recovery")
+async def init_recovery(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    """开启恢复阶段"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    records = db.query(AcceptanceRecord).join(
+        RecruitmentClassroom,
+        AcceptanceRecord.recruitment_classroom_id == RecruitmentClassroom.id
+    ).filter(RecruitmentClassroom.recruitment_id == recruit_id).all()
+
+    not_sealed = [r for r in records if r.status != "sealed"]
+    if not_sealed:
+        raise HTTPException(400, f"还有 {len(not_sealed)} 间教室未封门，不能开启恢复")
+
+    init_recovery_tasks(recruit_id, db)
+    return {"code": 0, "msg": "恢复任务已创建"}
+
+
+@app.post("/api/my-recovery-tasks")
+async def get_my_recovery_tasks(
+    student_id: str = Form(...),
+    phone: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """学生查看自己的恢复任务"""
+    if not (student_id.isdigit() and len(student_id) == 8):
+        raise HTTPException(400, "学号格式错误")
+    if not (phone.isdigit() and len(phone) == 11):
+        raise HTTPException(400, "手机号格式错误")
+
+    reg = db.query(Registration).filter(
+        Registration.student_id == student_id,
+        Registration.phone == phone
+    ).first()
+    if not reg:
+        raise HTTPException(404, "未找到报名记录")
+
+    member = db.query(RecruitmentGroupMember).join(
+        RecruitmentGroup,
+        RecruitmentGroupMember.group_id == RecruitmentGroup.id
+    ).filter(
+        RecruitmentGroupMember.registration_id == reg.id,
+        RecruitmentGroup.recruitment_id == reg.recruitment_id
+    ).first()
+
+    if not member:
+        return {"code": 0, "data": []}
+
+    assignments = db.query(RecruitmentGroupClassroom).filter(
+        RecruitmentGroupClassroom.group_id == member.group_id
+    ).all()
+
+    result = []
+    for assign in assignments:
+        rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
+        if not rc:
+            continue
+        cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+        if not cr:
+            continue
+
+        tasks = db.query(TaskProgress).filter(
+            TaskProgress.recruitment_classroom_id == rc.id,
+            TaskProgress.task_type == "recovery"
+        ).order_by(TaskProgress.id).all()
+
+        if not tasks:
+            continue
+
+        task_list = [{
+            "id": t.id,
+            "item_key": t.item_key,
+            "item_name": t.item_name,
+            "is_completed": t.is_completed,
+        } for t in tasks]
+
+        completed = sum(1 for t in tasks if t.is_completed)
+        total = len(tasks)
+
+        result.append({
+            "rc_id": rc.id,
+            "classroom_name": cr.name,
+            "tasks": task_list,
+            "progress": f"{completed}/{total}",
+            "all_done": completed >= total,
+        })
+
+    return {"code": 0, "data": result}
+
+
+@app.get("/api/recruit/{recruit_id}/recovery-progress")
+async def get_recovery_progress(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    """管理员查看恢复进度"""
+    check_admin_login(request)
+
+    groups = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).all()
+
+    result = []
+    for g in groups:
+        assigns = db.query(RecruitmentGroupClassroom).filter(
+            RecruitmentGroupClassroom.group_id == g.id
+        ).all()
+
+        for assign in assigns:
+            rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
+            if not rc:
+                continue
+            cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+            if not cr:
+                continue
+
+            tasks = db.query(TaskProgress).filter(
+                TaskProgress.recruitment_classroom_id == rc.id,
+                TaskProgress.task_type == "recovery"
+            ).all()
+
+            completed = sum(1 for t in tasks if t.is_completed)
+            total = len(tasks)
+
+            result.append({
+                "classroom_name": cr.name,
+                "zone_name": g.zone_name or "无分区",
+                "progress": f"{completed}/{total}",
+                "percent": int(completed / total * 100) if total > 0 else 0,
+                "all_done": completed >= total,
             })
 
     return {"code": 0, "data": result}
