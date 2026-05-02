@@ -99,6 +99,12 @@
             </form>
             <div id="myList"></div>
         </div>
+
+        <!-- 布置任务卡片 -->
+        <div class="card p-4 mt-4" id="taskCard" style="display:none;">
+            <h3 class="mb-3">📋 我的布置任务</h3>
+            <div id="taskList"></div>
+        </div>
     </div>
 
     <!-- 取消报名弹窗 -->
@@ -464,6 +470,9 @@
                         container.appendChild(ol);
                     }
 
+                    // 加载布置任务
+                    loadMyTasks(document.getElementById("myStudentId").value, document.getElementById("myPhone").value);
+
                 }
             } catch (err) {
                 showToast("查询失败，请重试", 'danger');
@@ -580,6 +589,81 @@
             loadExamList();
             setInterval(loadExamList, 30000);
         });
+        // ========== 布置任务 ==========
+
+        async function loadMyTasks(studentId, phone) {
+            const card = document.getElementById('taskCard');
+            const container = document.getElementById('taskList');
+
+            const formData = new FormData();
+            formData.append('student_id', studentId);
+            formData.append('phone', phone);
+
+            try {
+                const res = await fetch('/api/my-tasks', { method: 'POST', body: formData });
+                const data = await res.json();
+
+                if (data.code !== 0 || !data.data || data.data.length === 0) {
+                    card.style.display = 'none';
+                    return;
+                }
+
+                card.style.display = 'block';
+                let html = data.zone_name ? `<div class="mb-2 text-muted small">🏢 ${data.zone_name}</div>` : '';
+
+                data.data.forEach(item => {
+                    const examNos = item.exam_numbers.join('、');
+                    html += `<div class="card border mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center py-2">
+                    <span class="fw-bold">🏫 ${item.classroom_name}（${examNos}考场）</span>
+                    <span class="badge ${item.all_done ? 'bg-success' : 'bg-warning text-dark'}">${item.progress}</span>
+                </div>
+                <div class="card-body py-2">`;
+
+                    item.tasks.forEach(t => {
+                        if (t.is_auto_skip) {
+                            html += `<div class="d-flex align-items-center mb-1 text-muted">
+                        <span style="width:24px;">⏭️</span>
+                        <span class="small">${t.item_name}</span>
+                    </div>`;
+                        } else {
+                            const checked = t.is_completed ? 'checked' : '';
+                            const deco = t.is_completed ? 'text-decoration:line-through' : '';
+                            html += `<div class="form-check mb-1">
+                        <input class="form-check-input task-checkbox" type="checkbox" data-task-id="${t.id}" ${checked}>
+                        <label class="form-check-label small" style="${deco}">${t.item_name}</label>
+                    </div>`;
+                        }
+                    });
+
+                    html += `</div></div>`;
+                });
+
+                container.innerHTML = html;
+
+                // 绑定复选框事件
+                container.querySelectorAll('.task-checkbox').forEach(cb => {
+                    cb.addEventListener('change', async function() {
+                        const taskId = this.dataset.taskId;
+                        const label = this.nextElementSibling;
+                        try {
+                            const res = await fetch(`/api/tasks/${taskId}/toggle`, { method: 'POST' });
+                            const data = await res.json();
+                            if (data.code === 0) {
+                                label.style.textDecoration = data.is_completed ? 'line-through' : 'none';
+                                // 刷新进度
+                                setTimeout(() => loadMyTasks(studentId, phone), 500);
+                            }
+                        } catch (err) {
+                            this.checked = !this.checked;
+                            showToast('操作失败', 'danger');
+                        }
+                    });
+                });
+            } catch (err) {
+                card.style.display = 'none';
+            }
+        }
     </script>
 </body>
 
