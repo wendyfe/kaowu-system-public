@@ -85,6 +85,15 @@ class Recruitment(Base):
     qq_group = Column(String(300), nullable=True)  # QQ加群链接（qm.qq.com 或 tencent:// 协议）
     end_time = Column(DateTime, nullable=True)   # 北京时间
 
+class RecruitmentClassroom(Base):
+    """招募-教室关联：记录本次考试使用了哪些教室以及单/双模式"""
+    __tablename__ = "recruitment_classrooms"
+    id = Column(Integer, primary_key=True)
+    recruitment_id = Column(Integer, nullable=False)
+    classroom_id = Column(Integer, nullable=False)
+    exam_mode = Column(String(10), nullable=False, default="single")  # 'single' 或 'double'
+    exam_number_start = Column(Integer, nullable=False)  # 该教室考场起始号
+
 class Registration(Base):
     __tablename__ = "registration"
     id = Column(Integer, primary_key=True)
@@ -194,6 +203,45 @@ def detect_zone(classroom_name: str) -> str | None:
         return f"{first_char.upper()}栋"
     return None
 
+
+def serialize_recruit_classrooms(recruit_id: int, db: Session) -> list[dict]:
+    """查询某个招募的所有考场配置"""
+    rcs = db.query(RecruitmentClassroom).filter(
+        RecruitmentClassroom.recruitment_id == recruit_id
+    ).order_by(RecruitmentClassroom.exam_number_start).all()
+
+    if not rcs:
+        return []
+
+    classroom_ids = [rc.classroom_id for rc in rcs]
+    classrooms = {c.id: c for c in db.query(Classroom).filter(Classroom.id.in_(classroom_ids)).all()}
+    building_ids = {c.building_id for c in classrooms.values()}
+    buildings = {b.id: b.name for b in db.query(Building).filter(Building.id.in_(building_ids)).all()}
+
+    result = []
+    for rc in rcs:
+        cr = classrooms.get(rc.classroom_id)
+        if not cr:
+            continue
+        exam_numbers = []
+        if rc.exam_mode == "double":
+            exam_numbers = [rc.exam_number_start, rc.exam_number_start + 1]
+        else:
+            exam_numbers = [rc.exam_number_start]
+
+        result.append({
+            "id": rc.id,
+            "recruitment_id": rc.recruitment_id,
+            "classroom_id": rc.classroom_id,
+            "classroom_name": cr.name,
+            "building_name": buildings.get(cr.building_id, ""),
+            "exam_mode": rc.exam_mode,
+            "exam_number_start": rc.exam_number_start,
+            "exam_numbers": exam_numbers,
+        })
+    return result
+
+
 # 生成6位数字验证码
 def generate_verify_code():
     return ''.join(random.choices(string.digits, k=6))
@@ -293,6 +341,8 @@ async def add_recruit(
     need_num: int = Form(...),
     end_time_str: str = Form(None),
     qq_group: str = Form(None),
+    classroom_ids: str = Form(""),      # 逗号分隔的教室ID
+    exam_modes: str = Form(""),         # 逗号分隔的模式
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
@@ -319,6 +369,39 @@ async def add_recruit(
     db.add(recruit)
     db.commit()
     db.refresh(recruit)
+
+    # 处理考场配置
+    if classroom_ids and exam_modes:
+        ids_list = [x.strip() for x in classroom_ids.split(",") if x.strip()]
+        modes_list = [x.strip() for x in exam_modes.split(",") if x.strip()]
+        if len(ids_list) != len(modes_list):
+            raise HTTPException(400, "教室ID与模式数量不匹配")
+
+        exam_no = 1
+        for cid_str, mode in zip(ids_list, modes_list):
+            try:
+                cid = int(cid_str)
+            except ValueError:
+                continue
+            if mode not in ("single", "double"):
+                raise HTTPException(400, f"考场模式无效：{mode}")
+            classroom = db.query(Classroom).filter(Classroom.id == cid).first()
+            if not classroom:
+                raise HTTPException(400, f"教室ID {cid} 不存在")
+            if mode == "double" and not classroom.can_double_exam:
+                raise HTTPException(400, f"教室 {classroom.name} 不具备双考场条件")
+
+            rc = RecruitmentClassroom(
+                recruitment_id=recruit.id,
+                classroom_id=cid,
+                exam_mode=mode,
+                exam_number_start=exam_no
+            )
+            db.add(rc)
+            exam_no += 2 if mode == "double" else 1
+
+        db.commit()
+
     return {"code": 0, "msg": "发布成功"}
 
 # 编辑招募
@@ -330,6 +413,8 @@ async def edit_recruit(
     need_num: int = Form(...),
     end_time_str: str = Form(None),
     qq_group: str = Form(None),
+    classroom_ids: str = Form(""),      # 逗号分隔的教室ID
+    exam_modes: str = Form(""),         # 逗号分隔的模式
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
@@ -353,6 +438,42 @@ async def edit_recruit(
         except:
             raise HTTPException(400, "结束时间格式错误")
     recruit.qq_group = qq_group.strip() if qq_group and qq_group.strip() else None
+
+    # 更新考场配置（如果有提供）
+    if classroom_ids and exam_modes:
+        ids_list = [x.strip() for x in classroom_ids.split(",") if x.strip()]
+        modes_list = [x.strip() for x in exam_modes.split(",") if x.strip()]
+        if len(ids_list) != len(modes_list):
+            raise HTTPException(400, "教室ID与模式数量不匹配")
+
+        # 先删除旧配置
+        db.query(RecruitmentClassroom).filter(
+            RecruitmentClassroom.recruitment_id == recruit_id
+        ).delete()
+
+        exam_no = 1
+        for cid_str, mode in zip(ids_list, modes_list):
+            try:
+                cid = int(cid_str)
+            except ValueError:
+                continue
+            if mode not in ("single", "double"):
+                raise HTTPException(400, f"考场模式无效：{mode}")
+            classroom = db.query(Classroom).filter(Classroom.id == cid).first()
+            if not classroom:
+                raise HTTPException(400, f"教室ID {cid} 不存在")
+            if mode == "double" and not classroom.can_double_exam:
+                raise HTTPException(400, f"教室 {classroom.name} 不具备双考场条件")
+
+            rc = RecruitmentClassroom(
+                recruitment_id=recruit_id,
+                classroom_id=cid,
+                exam_mode=mode,
+                exam_number_start=exam_no
+            )
+            db.add(rc)
+            exam_no += 2 if mode == "double" else 1
+
     db.commit()
     return {"code": 0, "msg": "修改成功"}
 
@@ -429,6 +550,8 @@ async def get_admin_recruit_list(request: Request, db: Session = Depends(get_db)
     for r in recruits:
         count_val = counts.get(r.id, 0)
         status = "已关闭" if not r.is_active else ("已截止" if r.end_time and now > r.end_time else "进行中")
+        classrooms_info = serialize_recruit_classrooms(r.id, db)
+        total_exam_rooms = sum(len(c["exam_numbers"]) for c in classrooms_info)
         result.append({
             "id": r.id,
             "exam_name": r.exam_name,
@@ -436,7 +559,9 @@ async def get_admin_recruit_list(request: Request, db: Session = Depends(get_db)
             "registered": count_val,
             "end_time": r.end_time.strftime("%Y-%m-%d %H:%M") if r.end_time else None,
             "status": status,
-            "qq_group": r.qq_group
+            "qq_group": r.qq_group,
+            "classrooms": classrooms_info,
+            "total_exam_rooms": total_exam_rooms,
         })
     return result
 
@@ -898,3 +1023,12 @@ async def delete_classroom(
     db.delete(classroom)
     db.commit()
     return {"code": 0, "msg": "删除成功"}
+
+
+@app.get("/api/recruit/{recruit_id}/classrooms")
+async def get_recruit_classrooms(recruit_id: int, db: Session = Depends(get_db)):
+    """获取某个招募的考场配置"""
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+    return serialize_recruit_classrooms(recruit_id, db)
