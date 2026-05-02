@@ -131,6 +131,25 @@
                 </div>
             </div>
 
+            <!-- 编辑考场配置 -->
+            <div class="mt-4 pt-3 border-top">
+                <h6 class="mb-3">考场配置</h6>
+                <div class="mb-3">
+                    <label class="form-label">教学楼</label>
+                    <select id="editPublishBuilding" class="form-select">
+                        <option value="">请选择教学楼</option>
+                    </select>
+                </div>
+                <div id="editClassroomList" class="mb-2">
+                    <div class="text-muted small py-2">请先选择教学楼</div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center pt-2 mt-2">
+                    <span id="editSelectionCount" class="text-muted small">已选 0 间教室 → 0 个考场</span>
+                </div>
+                <input type="hidden" id="editClassroomIds">
+                <input type="hidden" id="editExamModes">
+            </div>
+
             <div class="d-grid gap-2 mt-4" style="position: sticky; bottom: 0; background: #fff; padding-top: 1rem;">
                 <button class="btn btn-custom" id="editConfirmBtn">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -3px; margin-right: 4px">
@@ -198,6 +217,24 @@
                         <div class="form-text">在QQ群 → 群管理 → 加群设置中生成加群链接（如 https://qm.qq.com/q/xxxxx）</div>
                     </div>
                 </div>
+                <!-- 选择考场场地 -->
+                <div class="mt-4 pt-3 border-top">
+                    <h5 class="mb-3">选择考场场地</h5>
+                    <div class="mb-3">
+                        <label class="form-label">教学楼</label>
+                        <select id="publishBuilding" class="form-select">
+                            <option value="">请选择教学楼</option>
+                        </select>
+                    </div>
+                    <div id="publishClassroomList" class="mb-2">
+                        <div class="text-muted small py-2">请先选择教学楼</div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center pt-2 mt-2">
+                        <span id="publishSelectionCount" class="text-muted small">已选 0 间教室 → 0 个考场</span>
+                    </div>
+                    <input type="hidden" name="classroom_ids" id="publishClassroomIds">
+                    <input type="hidden" name="exam_modes" id="publishExamModes">
+                </div>
                 <button type="submit" class="btn-custom mt-4">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -3px; margin-right: 4px">
                         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -219,7 +256,8 @@
                             <th style="width:12%">已报名人数</th>
                             <th style="width:18%">结束时间</th>
                             <th style="width:10%">状态</th>
-                            <th style="width:25%">操作</th>
+                            <th style="width:10%">考场数</th>
+                            <th style="width:20%">操作</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -381,6 +419,20 @@
             editPicker.setDate(oldEndTime && oldEndTime.trim() ? oldEndTime : '', false);
 
             editOffcanvas.show();
+
+            // 加载已有考场配置
+            editSelections = {};
+            fetch(`/api/recruit/${id}/classrooms`).then(r => r.json()).then(data => {
+                if (data && data.length > 0) {
+                    data.forEach(rc => {
+                        editSelections[rc.classroom_id] = rc.exam_mode;
+                    });
+                    updateEditCount();
+                    // 刷新当前教学楼下的教室勾选状态
+                    const bld = document.getElementById('editPublishBuilding').value;
+                    if (bld) loadEditClassrooms(bld);
+                }
+            }).catch(() => {});
         }
 
         document.getElementById('editConfirmBtn').addEventListener('click', async () => {
@@ -413,6 +465,14 @@
             formData.append('need_num', newNum);
             if (newEndTime) formData.append('end_time_str', newEndTime);
             if (newQqGroup) formData.append('qq_group', newQqGroup);
+
+            updateEditCount();
+            const eIds = document.getElementById('editClassroomIds').value;
+            const eModes = document.getElementById('editExamModes').value;
+            if (eIds) {
+                formData.append('classroom_ids', eIds);
+                formData.append('exam_modes', eModes);
+            }
 
             try {
                 const res = await fetch(`/api/recruit/${currentEditId}`, {
@@ -491,6 +551,12 @@
                     statusBadge.textContent = item.status;
                     tdStatus.appendChild(statusBadge);
                     tr.appendChild(tdStatus);
+
+                    const tdRooms = document.createElement("td");
+                    const totalRooms = item.total_exam_rooms || 0;
+                    tdRooms.textContent = totalRooms > 0 ? `${totalRooms} 个` : '未配置';
+                    if (!totalRooms) tdRooms.className = 'text-muted';
+                    tr.appendChild(tdRooms);
 
                     // 操作列
                     const tdActions = document.createElement("td");
@@ -707,6 +773,15 @@
             // 移除原 end_time 字段（已被 flatpickr 取代）
             formData.delete("end_time");
 
+            // 考场选择
+            updatePublishCount();
+            const pIds = document.getElementById('publishClassroomIds').value;
+            const pModes = document.getElementById('publishExamModes').value;
+            if (pIds) {
+                formData.append('classroom_ids', pIds);
+                formData.append('exam_modes', pModes);
+            }
+
             try {
                 const res = await fetch("/api/recruit/add", {
                     method: "POST",
@@ -719,6 +794,7 @@
                 showToast(data.msg, data.code === 0 ? 'success' : 'danger');
                 if (data.code === 0) {
                     e.target.reset();
+                    publishSelections = {};
                     publishPicker.clear(); // 同时清空日期选择器
                     loadRecruitList();
                 }
@@ -732,6 +808,9 @@
 
         // 页面加载时获取列表
         loadRecruitList();
+
+        // 初始化考场选择
+        loadPublishBuildings();
 
         // ========== 教室管理 ==========
 
@@ -985,6 +1064,200 @@
             a.click();
             URL.revokeObjectURL(url);
         });
+
+// ========== 考场选择（发布 + 编辑） ==========
+
+let publishSelections = {};   // { classroom_id: 'single'|'double' }
+let editSelections = {};      // same structure for edit mode
+
+// 发布表单 - 加载教学楼
+async function loadPublishBuildings() {
+    try {
+        const res = await fetch('/api/buildings');
+        const list = await res.json();
+        const select = document.getElementById('publishBuilding');
+        select.innerHTML = '<option value="">请选择教学楼</option>';
+        list.forEach(b => {
+            const opt = document.createElement('option');
+            opt.value = b.id;
+            opt.textContent = b.name;
+            select.appendChild(opt);
+        });
+    } catch (err) {
+        console.error('加载教学楼失败', err);
+    }
+}
+
+// 发布表单 - 加载教室
+async function loadPublishClassrooms(buildingId) {
+    try {
+        const url = buildingId ? `/api/classrooms?building_id=${buildingId}` : '/api/classrooms';
+        const res = await fetch(url);
+        const list = await res.json();
+        const container = document.getElementById('publishClassroomList');
+        container.innerHTML = '';
+        if (list.length === 0) {
+            container.innerHTML = '<div class="text-muted small py-2">该教学楼暂无教室</div>';
+            return;
+        }
+        list.forEach(c => {
+            const div = document.createElement('div');
+            div.className = 'form-check form-check-inline mb-2';
+            div.style.minWidth = '180px';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'form-check-input';
+            cb.value = c.id;
+            cb.id = `p_cb_${c.id}`;
+            cb.dataset.canDouble = c.can_double_exam;
+            const label = document.createElement('label');
+            label.className = 'form-check-label';
+            label.htmlFor = `p_cb_${c.id}`;
+            label.textContent = c.name + (c.is_fixed_seats ? ' 🪑' : '');
+            div.appendChild(cb);
+            div.appendChild(label);
+            const ms = document.createElement('select');
+            ms.className = 'form-select form-select-sm d-inline-block ms-1';
+            ms.style.width = '95px';
+            ms.disabled = true;
+            ms.innerHTML = `<option value="single">单考场</option><option value="double">${c.can_double_exam ? '双考场' : '双考场(不可用)'}</option>`;
+            if (!c.can_double_exam) ms.querySelector('[value="double"]').disabled = true;
+            div.appendChild(ms);
+            cb.addEventListener('change', function() {
+                ms.disabled = !this.checked;
+                if (this.checked) {
+                    const def = c.can_double_exam ? 'double' : 'single';
+                    ms.value = def;
+                    publishSelections[c.id] = def;
+                } else {
+                    delete publishSelections[c.id];
+                }
+                updatePublishCount();
+            });
+            ms.addEventListener('change', function() {
+                if (cb.checked) { publishSelections[c.id] = this.value; updatePublishCount(); }
+            });
+            if (publishSelections[c.id] !== undefined) {
+                cb.checked = true;
+                ms.disabled = false;
+                ms.value = publishSelections[c.id];
+            }
+            container.appendChild(div);
+        });
+    } catch (err) {
+        document.getElementById('publishClassroomList').innerHTML = '<div class="text-danger small">加载失败</div>';
+    }
+}
+
+function updatePublishCount() {
+    let total = 0;
+    const ids = [], modes = [];
+    for (const [cid, mode] of Object.entries(publishSelections)) {
+        ids.push(cid); modes.push(mode);
+        total += mode === 'double' ? 2 : 1;
+    }
+    document.getElementById('publishSelectionCount').textContent = `已选 ${ids.length} 间教室 → ${total} 个考场`;
+    document.getElementById('publishClassroomIds').value = ids.join(',');
+    document.getElementById('publishExamModes').value = modes.join(',');
+}
+
+document.getElementById('publishBuilding')?.addEventListener('change', function() {
+    loadPublishClassrooms(this.value);
+});
+
+// 编辑表单 - 加载教学楼
+async function loadEditBuildings(selectedId) {
+    try {
+        const res = await fetch('/api/buildings');
+        const list = await res.json();
+        const select = document.getElementById('editPublishBuilding');
+        select.innerHTML = '<option value="">请选择教学楼</option>';
+        list.forEach(b => {
+            const opt = document.createElement('option');
+            opt.value = b.id;
+            opt.textContent = b.name;
+            if (selectedId && b.id == selectedId) opt.selected = true;
+            select.appendChild(opt);
+        });
+    } catch (err) { console.error(err); }
+}
+
+// 编辑表单 - 加载教室
+async function loadEditClassrooms(buildingId) {
+    try {
+        const url = buildingId ? `/api/classrooms?building_id=${buildingId}` : '/api/classrooms';
+        const res = await fetch(url);
+        const list = await res.json();
+        const container = document.getElementById('editClassroomList');
+        container.innerHTML = '';
+        if (list.length === 0) {
+            container.innerHTML = '<div class="text-muted small py-2">该教学楼暂无教室</div>';
+            return;
+        }
+        list.forEach(c => {
+            const div = document.createElement('div');
+            div.className = 'form-check form-check-inline mb-2';
+            div.style.minWidth = '180px';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'form-check-input';
+            cb.value = c.id;
+            cb.id = `e_cb_${c.id}`;
+            cb.dataset.canDouble = c.can_double_exam;
+            const label = document.createElement('label');
+            label.className = 'form-check-label';
+            label.htmlFor = `e_cb_${c.id}`;
+            label.textContent = c.name + (c.is_fixed_seats ? ' 🪑' : '');
+            div.appendChild(cb);
+            div.appendChild(label);
+            const ms = document.createElement('select');
+            ms.className = 'form-select form-select-sm d-inline-block ms-1';
+            ms.style.width = '95px';
+            ms.disabled = true;
+            ms.innerHTML = `<option value="single">单考场</option><option value="double">${c.can_double_exam ? '双考场' : '双考场(不可用)'}</option>`;
+            if (!c.can_double_exam) ms.querySelector('[value="double"]').disabled = true;
+            div.appendChild(ms);
+            cb.addEventListener('change', function() {
+                ms.disabled = !this.checked;
+                if (this.checked) {
+                    const def = c.can_double_exam ? 'double' : 'single';
+                    ms.value = def;
+                    editSelections[c.id] = def;
+                } else {
+                    delete editSelections[c.id];
+                }
+                updateEditCount();
+            });
+            ms.addEventListener('change', function() {
+                if (cb.checked) { editSelections[c.id] = this.value; updateEditCount(); }
+            });
+            if (editSelections[c.id] !== undefined) {
+                cb.checked = true;
+                ms.disabled = false;
+                ms.value = editSelections[c.id];
+            }
+            container.appendChild(div);
+        });
+    } catch (err) {
+        document.getElementById('editClassroomList').innerHTML = '<div class="text-danger small">加载失败</div>';
+    }
+}
+
+function updateEditCount() {
+    let total = 0;
+    const ids = [], modes = [];
+    for (const [cid, mode] of Object.entries(editSelections)) {
+        ids.push(cid); modes.push(mode);
+        total += mode === 'double' ? 2 : 1;
+    }
+    document.getElementById('editSelectionCount').textContent = `已选 ${ids.length} 间教室 → ${total} 个考场`;
+    document.getElementById('editClassroomIds').value = ids.join(',');
+    document.getElementById('editExamModes').value = modes.join(',');
+}
+
+document.getElementById('editPublishBuilding')?.addEventListener('change', function() {
+    loadEditClassrooms(this.value);
+});
     </script>
 </body>
 </html>
