@@ -151,6 +151,15 @@
                 <input type="hidden" id="editExamModes">
             </div>
 
+            <!-- 编辑验收配置 -->
+            <div class="mt-4 pt-3 border-top">
+                <h6 class="mb-3">验收配置</h6>
+                <div class="form-check">
+                    <input type="checkbox" class="form-check-input" id="editHasFloorSupervisors" value="true">
+                    <label class="form-check-label" for="editHasFloorSupervisors">需要楼栋负责人</label>
+                </div>
+            </div>
+
             <div class="d-grid gap-2 mt-4" style="position: sticky; bottom: 0; background: #fff; padding-top: 1rem;">
                 <button class="btn btn-custom" id="editConfirmBtn">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -3px; margin-right: 4px">
@@ -227,6 +236,17 @@
                         <input type="hidden" name="exam_modes" id="publishExamModes">
                     </div>
                 </div>
+                <!-- 验收配置 -->
+                <div class="row mt-4 pt-3 border-top">
+                    <div class="col-12">
+                        <h5 class="mb-3">验收配置</h5>
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" name="has_floor_supervisors" id="publishHasFloorSupervisors" value="true">
+                            <label class="form-check-label" for="publishHasFloorSupervisors">需要楼栋负责人（大考建议勾选，小考可跳过）</label>
+                            <div class="form-text">勾选后验收流程包含楼栋负责人检查环节</div>
+                        </div>
+                    </div>
+                </div>
                 <button type="submit" class="btn-custom mt-4">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -3px; margin-right: 4px">
                         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -259,10 +279,9 @@
             </div>
             </div>
         </div>
+            </div><!-- /.container -->
         </div><!-- /content-wrapper -->
     </div><!-- /recruit-panel -->
-        </div><!-- close content-wrapper -->
-    </div><!-- close recruit-panel -->
 
         <!-- 教室管理 -->
         <div class="tab-pane fade" id="classroom-panel" role="tabpanel">
@@ -326,6 +345,12 @@
                             <div class="form-check">
                                 <input type="checkbox" class="form-check-input" id="formCanDouble">
                                 <label class="form-check-label">具备双考场条件（大教室）</label>
+                            </div>
+                        </div>
+                        <div class="mb-3" id="formEnabledGroup">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="formEnabled" checked>
+                                <label class="form-check-label">启用为可用考场</label>
                             </div>
                         </div>
                     </form>
@@ -480,13 +505,14 @@
         let currentEditOldData = null;
         const editOffcanvas = new bootstrap.Offcanvas(document.getElementById('editOffcanvas'));
 
-        function openEditPanel(id, oldName, oldNum, oldEndTime, oldQqGroup) {
+        function openEditPanel(id, oldName, oldNum, oldEndTime, oldQqGroup, oldHasFloor) {
             currentEditId = id;
             currentEditOldData = { name: oldName, num: oldNum, endTime: oldEndTime };
 
             document.getElementById('editExamName').value = oldName;
             document.getElementById('editNeedNum').value = oldNum;
             document.getElementById('editQqGroup').value = oldQqGroup || '';
+            document.getElementById('editHasFloorSupervisors').checked = !!oldHasFloor;
 
             // 设置日期选择器的值（后端格式 "YYYY-MM-DD HH:MM" → flatpickr 自动解析）
             editPicker.setDate(oldEndTime && oldEndTime.trim() ? oldEndTime : '', false);
@@ -537,6 +563,7 @@
             formData.append('need_num', newNum);
             if (newEndTime) formData.append('end_time_str', newEndTime);
             if (newQqGroup) formData.append('qq_group', newQqGroup);
+            formData.append('has_floor_supervisors', document.getElementById('editHasFloorSupervisors').checked);
 
             updateEditCount();
             const eIds = document.getElementById('editClassroomIds').value;
@@ -551,7 +578,7 @@
                     method: 'PUT',
                     body: formData,
                     headers: {
-                        'X-CSRF-Token': document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || ''
+                        'X-CSRF-Token': getCsrf()
                     }
                 });
                 if (!res.ok) {
@@ -641,7 +668,7 @@
                     editLink.textContent = "编辑";
                     editLink.onclick = function (e) {
                         e.preventDefault();
-                        openEditPanel(item.id, item.exam_name, item.need_num, item.end_time, item.qq_group);
+                        openEditPanel(item.id, item.exam_name, item.need_num, item.end_time, item.qq_group, item.has_floor_supervisors);
                     };
                     tdActions.appendChild(editLink);
 
@@ -811,7 +838,7 @@
                 const res = await fetch(`/api/recruit/${id}/toggle`, {
                     method: "POST",
                     headers: {
-                        "X-CSRF-Token": document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || ''
+                        "X-CSRF-Token": getCsrf()
                     }
                 });
                 const data = await res.json();
@@ -830,7 +857,7 @@
                 const res = await fetch(`/api/recruit/${id}`, {
                     method: "DELETE",
                     headers: {
-                        "X-CSRF-Token": document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || ''
+                        "X-CSRF-Token": getCsrf()
                     }
                 });
                 const data = await res.json();
@@ -892,7 +919,7 @@
                     method: "POST",
                     body: formData,
                     headers: {
-                        "X-CSRF-Token": document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || ''
+                        "X-CSRF-Token": getCsrf()
                     }
                 });
                 const data = await res.json();
@@ -1024,6 +1051,7 @@
                             editLink.dataset.name = c.name;
                             editLink.dataset.fixed = c.is_fixed_seats;
                             editLink.dataset.double = c.can_double_exam;
+                            editLink.dataset.enabled = c.is_enabled;
                             actions.appendChild(editLink);
 
                             const delLink = document.createElement('a');
@@ -1051,10 +1079,12 @@
                         e.preventDefault();
                         classroomEditId = parseInt(this.dataset.id);
                         document.getElementById('classroomModalTitle').textContent = '编辑教室';
+                        document.getElementById('formEnabledGroup').style.display = 'block';
                         document.getElementById('formClassName').value = this.dataset.name;
                         document.getElementById('formClassName').disabled = false;
                         document.getElementById('formFixedSeats').checked = this.dataset.fixed === 'true';
                         document.getElementById('formCanDouble').checked = this.dataset.double === 'true';
+                        document.getElementById('formEnabled').checked = this.dataset.enabled !== 'false';
                         loadBuildingSelect('formBuildingId', this.dataset.buildingId);
                         new bootstrap.Modal(document.getElementById('classroomModal')).show();
                     });
@@ -1067,7 +1097,7 @@
                         try {
                             const res = await fetch(`/api/classrooms/${this.dataset.id}/toggle-enabled`, {
                                 method: 'PUT',
-                                headers: { 'X-CSRF-Token': document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '' }
+                                headers: { 'X-CSRF-Token': getCsrf() }
                             });
                             const data = await res.json();
                             showToast(data.msg, data.code === 0 ? 'success' : 'danger');
@@ -1084,7 +1114,7 @@
                         try {
                             const res = await fetch(`/api/classrooms/${this.dataset.id}`, {
                                 method: 'DELETE',
-                                headers: { 'X-CSRF-Token': document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '' }
+                                headers: { 'X-CSRF-Token': getCsrf() }
                             });
                             const data = await res.json();
                             showToast(data.msg, data.code === 0 ? 'success' : 'danger');
@@ -1110,7 +1140,7 @@
             }
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
-            const csrf = document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+            const csrf = getCsrf();
             try {
                 const res = await fetch('/api/classrooms/import', {
                     method: 'POST',
@@ -1135,6 +1165,8 @@
             document.getElementById('classroomModalTitle').textContent = '添加教室';
             document.getElementById('classroomForm').reset();
             document.getElementById('formClassName').disabled = false;
+            document.getElementById('formEnabled').checked = true;
+            document.getElementById('formEnabledGroup').style.display = 'none';
             loadBuildingSelect('formBuildingId');
             new bootstrap.Modal(document.getElementById('classroomModal')).show();
         });
@@ -1156,7 +1188,7 @@
                 return;
             }
 
-            const csrf = document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+            const csrf = getCsrf();
             try {
                 const url = classroomEditId ? `/api/classrooms/${classroomEditId}` : '/api/classrooms';
                 const method = classroomEditId ? 'PUT' : 'POST';
@@ -1166,6 +1198,9 @@
                 body.append('building_id', document.getElementById('formBuildingId').value);
                 body.append('is_fixed_seats', document.getElementById('formFixedSeats').checked);
                 body.append('can_double_exam', document.getElementById('formCanDouble').checked);
+                if (classroomEditId) {
+                    body.append('is_enabled', document.getElementById('formEnabled').checked);
+                }
 
                 const res = await fetch(url, {
                     method,
@@ -1614,10 +1649,10 @@ async function setGeneralSupervisor(regId) {
 }
 
 async function removeGeneralSupervisor() {
-    const formData = new FormData();
-    formData.append('registration_id', '');
     const csrf = getCsrf();
     try {
+        const formData = new FormData();
+        // 不传 registration_id，触发后端 Form(None) → 设置为 None (移除)
         const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/general-supervisor`, {
             method: 'PUT', body: formData, headers: { 'X-CSRF-Token': csrf }
         });
@@ -1631,9 +1666,13 @@ function renderSupervisorTab() {
     const container = document.getElementById('tabSupervisorContent');
     const data = groupingData;
 
-    const zones = [...new Set(data.classrooms.map(c => c.zone).filter(z => z))];
+    // Auto-detect zones from selected classrooms
+    const zones = [...new Set(data.classrooms.map(c => c.zone).filter(z => z && z !== '未分区'))];
+    const classroomsByZone = {};
+    zones.forEach(z => { classroomsByZone[z] = data.classrooms.filter(c => c.zone === z); });
+
     if (zones.length === 0) {
-        container.innerHTML = '<div class="text-muted py-4">暂无楼栋分区数据</div>';
+        container.innerHTML = `<div class="alert alert-warning py-2">⚠️ 根据当前考场配置未检测到楼栋分区。<br><small>如果教室名称含英文字母（如 B101），将自动推导为对应栋（B栋）。请确认发布招募时已选择考场。</small></div>`;
         return;
     }
 
@@ -1641,13 +1680,15 @@ function renderSupervisorTab() {
     const supervisorMap = {};
     data.supervisors.forEach(s => { supervisorMap[s.zone_name] = s.registration_id; });
 
-    let html = `<div class="alert alert-info py-2">同一人可以负责多栋。跳过此步骤可能会影响验收流程。</div>`;
+    let html = `<div class="alert alert-info py-2">根据所选考场自动检测到 <strong>${zones.length}</strong> 个分区：${zones.join('、')}。同一人可以负责多栋。</div>`;
     html += `<div class="row g-3">`;
 
     zones.forEach(zone => {
         const currentId = supervisorMap[zone] || '';
+        const roomNames = (classroomsByZone[zone] || []).map(c => c.name).join('、');
         html += `<div class="col-md-4"><div class="border rounded p-3">`;
-        html += `<div class="fw-bold mb-2">${zone}</div>`;
+        html += `<div class="fw-bold mb-1">${zone}</div>`;
+        html += `<div class="small text-muted mb-2">教室：${roomNames}</div>`;
         html += `<select class="form-select form-select-sm zone-supervisor-select" data-zone="${zone}">`;
         html += `<option value="">（不指定）</option>`;
         candidates.forEach(r => {
@@ -1655,8 +1696,9 @@ function renderSupervisorTab() {
             html += `<option value="${r.id}" ${selected}>${r.name}（${r.gender}${r.has_experience ? '⭐' : ''}）</option>`;
         });
         html += `</select>`;
-        if (candidates.find(r => r.id === currentId)) {
-            html += `<div class="small text-muted mt-1">当前：${candidates.find(r => r.id === currentId).name}</div>`;
+        const currentPerson = candidates.find(r => r.id === currentId);
+        if (currentPerson) {
+            html += `<div class="small text-muted mt-1">当前：${currentPerson.name}</div>`;
         }
         html += `</div></div>`;
     });
@@ -1753,19 +1795,47 @@ function renderGroupsTab() {
 
 async function saveAllGroupMembers() {
     const csrf = getCsrf();
-    document.querySelectorAll('.group-members-area').forEach(area => {
+    const groups = document.querySelectorAll('.group-members-area');
+    const promises = [];
+
+    // Check for duplicate members across groups
+    const allMembersByGroup = {};
+    const seenAcrossGroups = new Map(); // regId -> groupId
+    groups.forEach(area => {
         const groupId = parseInt(area.dataset.groupId);
         const memberIds = [];
         area.querySelectorAll('[data-reg-id]').forEach(el => {
-            memberIds.push(parseInt(el.dataset.regId));
+            const rid = parseInt(el.dataset.regId);
+            memberIds.push(rid);
+            if (seenAcrossGroups.has(rid) && seenAcrossGroups.get(rid) !== groupId) {
+                showToast(`${el.textContent.trim().split('（')[0]} 同时在多个组中，请先移出再分配`, 'warning');
+            }
+            seenAcrossGroups.set(rid, groupId);
         });
-        fetch(`/api/recruit/${currentGroupingRecruitId}/groups/${groupId}/members`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
-            body: JSON.stringify({ member_ids: memberIds }),
-        }).catch(() => {});
+        allMembersByGroup[groupId] = memberIds;
     });
-    showToast('分组已保存', 'success');
+
+    for (const [groupId, memberIds] of Object.entries(allMembersByGroup)) {
+        promises.push(
+            fetch(`/api/recruit/${currentGroupingRecruitId}/groups/${groupId}/members`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+                body: JSON.stringify({ member_ids: memberIds }),
+            }).then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+        );
+    }
+
+    try {
+        const results = await Promise.all(promises);
+        const failed = results.filter(r => !r.ok);
+        if (failed.length > 0) {
+            showToast(`保存失败：${failed.map(f => f.data.detail || '未知错误').join('；')}`, 'danger');
+        } else {
+            showToast('分组已保存', 'success');
+        }
+    } catch (err) {
+        showToast('保存失败，请重试', 'danger');
+    }
 }
 
 async function createNewGroup() {
@@ -1858,6 +1928,8 @@ function renderClassroomsTab() {
 
 async function saveAllClassroomAssignments() {
     const csrf = getCsrf();
+
+    // Collect checked assignments per group
     const groupMap = {};
     document.querySelectorAll('.group-classroom-cb:checked').forEach(cb => {
         const gid = parseInt(cb.dataset.groupId);
@@ -1865,21 +1937,42 @@ async function saveAllClassroomAssignments() {
         groupMap[gid].push(parseInt(cb.dataset.rcId));
     });
 
+    // Also include groups with zero checked (to clear old assignments)
+    const allGroupIds = new Set();
+    document.querySelectorAll('.group-classroom-cb').forEach(cb => {
+        allGroupIds.add(parseInt(cb.dataset.groupId));
+    });
+    allGroupIds.forEach(gid => {
+        if (!groupMap[gid]) groupMap[gid] = [];
+    });
+
+    const promises = [];
     for (const [gid, rcIds] of Object.entries(groupMap)) {
-        try {
-            await fetch(`/api/recruit/${currentGroupingRecruitId}/groups/${gid}/classrooms`, {
+        promises.push(
+            fetch(`/api/recruit/${currentGroupingRecruitId}/groups/${gid}/classrooms`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
                 body: JSON.stringify({ rc_ids: rcIds }),
-            });
-        } catch (err) { /* per-group error */ }
+            }).then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+        );
     }
-    showToast('教室分配已保存', 'success');
+
+    try {
+        const results = await Promise.all(promises);
+        const failed = results.filter(r => !r.ok);
+        if (failed.length > 0) {
+            showToast(`保存失败：${failed.map(f => f.data.detail || '未知错误').join('；')}`, 'danger');
+        } else {
+            showToast('教室分配已保存', 'success');
+        }
+    } catch (err) {
+        showToast('保存失败，请重试', 'danger');
+    }
 }
 
 // Utility
 function getCsrf() {
-    return document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+    return getCsrf();
 }
 
 // Finalize button
@@ -1967,7 +2060,7 @@ function renderAcceptance(items) {
 document.getElementById('sealAllBtn')?.addEventListener('click', async () => {
     if (!currentAcceptRecruitId) return;
     if (!await showConfirm('确认封门', '确定封门吗？所有已通过的教室将被锁定。')) return;
-    const csrf = document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+    const csrf = getCsrf();
     try {
         const res = await fetch(`/api/recruit/${currentAcceptRecruitId}/acceptance/seal`, {
             method: 'POST',
@@ -2043,7 +2136,7 @@ function renderRecovery(items) {
 document.getElementById('initRecoveryBtn')?.addEventListener('click', async () => {
     if (!currentRecoveryRecruitId) return;
     if (!await showConfirm('确认开启', '确定开启恢复阶段吗？所有已封门教室的恢复任务将被创建。')) return;
-    const csrf = document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+    const csrf = getCsrf();
     try {
         const res = await fetch(`/api/recruit/${currentRecoveryRecruitId}/init-recovery`, {
             method: 'POST',

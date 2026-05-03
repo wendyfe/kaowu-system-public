@@ -22,6 +22,7 @@ from email.utils import formataddr
 import random
 import string
 import time
+import json
 
 
 # ==================== 北京时间配置 ====================
@@ -84,6 +85,7 @@ class Recruitment(Base):
     is_active = Column(Boolean, default=True)
     qq_group = Column(String(300), nullable=True)  # QQ加群链接（qm.qq.com 或 tencent:// 协议）
     general_supervisor_id = Column(Integer, nullable=True)  # 总负责人，关联 registration.id
+    has_floor_supervisors = Column(Boolean, default=False)  # 是否需要楼栋负责人（大考/小考自适应）
     end_time = Column(DateTime, nullable=True)   # 北京时间
 
 class RecruitmentClassroom(Base):
@@ -111,6 +113,7 @@ class RecruitmentGroupMember(Base):
     id = Column(Integer, primary_key=True)
     group_id = Column(Integer, nullable=False)
     registration_id = Column(Integer, nullable=False)
+    __table_args__ = (UniqueConstraint('group_id', 'registration_id', name='uq_group_member'),)
 
 
 class RecruitmentGroupClassroom(Base):
@@ -229,6 +232,25 @@ except Exception:
 try:
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE classrooms ADD COLUMN is_enabled BOOLEAN DEFAULT 1"))
+        conn.commit()
+except Exception:
+    pass  # 字段已存在
+
+# 数据库迁移：组成员唯一约束
+try:
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_group_member
+            ON recruitment_group_members (group_id, registration_id)
+        """))
+        conn.commit()
+except Exception:
+    pass  # 索引已存在
+
+# 数据库迁移：has_floor_supervisors 字段
+try:
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE recruitment ADD COLUMN has_floor_supervisors BOOLEAN DEFAULT 0"))
         conn.commit()
 except Exception:
     pass  # 字段已存在
@@ -542,6 +564,7 @@ async def add_recruit(
     qq_group: str = Form(None),
     classroom_ids: str = Form(""),      # 逗号分隔的教室ID
     exam_modes: str = Form(""),         # 逗号分隔的模式
+    has_floor_supervisors: bool = Form(False),
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
@@ -564,7 +587,7 @@ async def add_recruit(
                     detail=f"结束时间格式错误（收到: {end_time_str}），应为 YYYY-MM-DD HH:MM 或 YYYY-MM-DDTHH:MM"
                 )
 
-    recruit = Recruitment(exam_name=exam_name.strip(), need_num=need_num, end_time=end_time, qq_group=qq_group.strip() if qq_group and qq_group.strip() else None)
+    recruit = Recruitment(exam_name=exam_name.strip(), need_num=need_num, end_time=end_time, qq_group=qq_group.strip() if qq_group and qq_group.strip() else None, has_floor_supervisors=has_floor_supervisors)
     db.add(recruit)
     db.commit()
     db.refresh(recruit)
@@ -614,6 +637,7 @@ async def edit_recruit(
     qq_group: str = Form(None),
     classroom_ids: str = Form(""),      # 逗号分隔的教室ID
     exam_modes: str = Form(""),         # 逗号分隔的模式
+    has_floor_supervisors: bool = Form(False),
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
@@ -637,6 +661,7 @@ async def edit_recruit(
         except:
             raise HTTPException(400, "结束时间格式错误")
     recruit.qq_group = qq_group.strip() if qq_group and qq_group.strip() else None
+    recruit.has_floor_supervisors = has_floor_supervisors
 
     # 更新考场配置（如果有提供）
     if classroom_ids and exam_modes:
@@ -697,10 +722,27 @@ async def delete_recruit(request: Request, recruit_id: int, db: Session = Depend
     recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
     if not recruit:
         raise HTTPException(404, "招募不存在")
+    # 删除关联：验收记录、任务进度
+    rc_ids = [rc.id for rc in db.query(RecruitmentClassroom).filter(RecruitmentClassroom.recruitment_id == recruit_id).all()]
+    if rc_ids:
+        db.query(AcceptanceRecord).filter(AcceptanceRecord.recruitment_classroom_id.in_(rc_ids)).delete(synchronize_session=False)
+        db.query(TaskProgress).filter(TaskProgress.recruitment_classroom_id.in_(rc_ids)).delete(synchronize_session=False)
+
+    # 删除关联：分组（含成员和教室分配）
+    group_ids = [g.id for g in db.query(RecruitmentGroup).filter(RecruitmentGroup.recruitment_id == recruit_id).all()]
+    if group_ids:
+        db.query(RecruitmentGroupMember).filter(RecruitmentGroupMember.group_id.in_(group_ids)).delete(synchronize_session=False)
+        db.query(RecruitmentGroupClassroom).filter(RecruitmentGroupClassroom.group_id.in_(group_ids)).delete(synchronize_session=False)
+        db.query(RecruitmentGroup).filter(RecruitmentGroup.id.in_(group_ids)).delete(synchronize_session=False)
+
+    # 删除关联：教室配置、楼栋负责人
+    db.query(RecruitmentClassroom).filter(RecruitmentClassroom.recruitment_id == recruit_id).delete(synchronize_session=False)
+    db.query(BuildingSupervisor).filter(BuildingSupervisor.recruitment_id == recruit_id).delete(synchronize_session=False)
+
     # 先删关联的报名记录
-    db.query(Registration).filter(Registration.recruitment_id == recruit_id).delete()
+    db.query(Registration).filter(Registration.recruitment_id == recruit_id).delete(synchronize_session=False)
     # 再删招募
-    db.query(Recruitment).filter(Recruitment.id == recruit_id).delete()
+    db.query(Recruitment).filter(Recruitment.id == recruit_id).delete(synchronize_session=False)
     db.commit()
     return {"code": 0, "msg": "删除成功"}
 
@@ -759,6 +801,7 @@ async def get_admin_recruit_list(request: Request, db: Session = Depends(get_db)
             "end_time": r.end_time.strftime("%Y-%m-%d %H:%M") if r.end_time else None,
             "status": status,
             "qq_group": r.qq_group,
+            "has_floor_supervisors": r.has_floor_supervisors,
             "classrooms": classrooms_info,
             "total_exam_rooms": total_exam_rooms,
         })
@@ -1204,6 +1247,7 @@ async def update_classroom(
     building_id: int = Form(None),
     is_fixed_seats: bool = Form(False),
     can_double_exam: bool = Form(False),
+    is_enabled: bool = Form(True),
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
@@ -1237,6 +1281,7 @@ async def update_classroom(
 
     classroom.is_fixed_seats = is_fixed_seats
     classroom.can_double_exam = can_double_exam
+    classroom.is_enabled = is_enabled
     db.commit()
     return {"code": 0, "msg": "修改成功"}
 
@@ -1363,7 +1408,7 @@ async def get_manual_grouping_data(recruit_id: int, db: Session = Depends(get_db
 @app.put("/api/recruit/{recruit_id}/general-supervisor")
 async def set_general_supervisor(
     request: Request, recruit_id: int,
-    registration_id: int = Form(None),
+    registration_id: int | None = Form(None),
     db: Session = Depends(get_db)
 ):
     """设置或移除总负责人"""
@@ -1374,7 +1419,7 @@ async def set_general_supervisor(
     if not recruit:
         raise HTTPException(404, "招募不存在")
 
-    if registration_id:
+    if registration_id is not None and registration_id > 0:
         reg = db.query(Registration).filter(
             Registration.id == registration_id,
             Registration.recruitment_id == recruit_id
@@ -1382,10 +1427,10 @@ async def set_general_supervisor(
         if not reg:
             raise HTTPException(400, "该报名记录不存在或不在此招募中")
 
-    recruit.general_supervisor_id = registration_id
+    recruit.general_supervisor_id = registration_id if registration_id and registration_id > 0 else None
     db.commit()
-    return {"code": 0, "msg": "总负责人已设置" if registration_id else "总负责人已移除",
-            "general_supervisor_id": registration_id}
+    return {"code": 0, "msg": "总负责人已设置" if registration_id and registration_id > 0 else "总负责人已移除",
+            "general_supervisor_id": recruit.general_supervisor_id}
 
 
 @app.put("/api/recruit/{recruit_id}/building-supervisors")
@@ -1397,7 +1442,6 @@ async def set_building_supervisors(
     check_admin_login(request)
     check_csrf(request)
 
-    import json
     body = await request.json()
     supervisors = body.get("supervisors", [])
 
@@ -1472,7 +1516,6 @@ async def set_group_members(
     check_admin_login(request)
     check_csrf(request)
 
-    import json
     body = await request.json()
     member_ids = body.get("member_ids", [])
 
@@ -1488,7 +1531,11 @@ async def set_group_members(
     ).delete()
     db.flush()
 
+    seen = set()
     for rid in member_ids:
+        if rid in seen:
+            continue
+        seen.add(rid)
         reg = db.query(Registration).filter(
             Registration.id == rid,
             Registration.recruitment_id == recruit_id
@@ -1509,7 +1556,6 @@ async def set_group_classrooms(
     check_admin_login(request)
     check_csrf(request)
 
-    import json
     body = await request.json()
     rc_ids = body.get("rc_ids", [])
 
@@ -1571,6 +1617,12 @@ async def finalize_grouping(request: Request, recruit_id: int, db: Session = Dep
         if cnt == 0:
             raise HTTPException(400, f"第{g.id}组没有成员，请先分配人员")
 
+        room_cnt = db.query(RecruitmentGroupClassroom).filter(
+            RecruitmentGroupClassroom.group_id == g.id
+        ).count()
+        if room_cnt == 0:
+            raise HTTPException(400, f"第{g.id}组没有分配教室，请先在「分配教室」中分配")
+
     init_task_progress(recruit_id, db)
     init_acceptance_records(recruit_id, db)
     return {"code": 0, "msg": "分组已确认，任务清单和验收记录已创建"}
@@ -1630,7 +1682,6 @@ async def save_groups(request: Request, recruit_id: int, db: Session = Depends(g
     check_admin_login(request)
     check_csrf(request)
 
-    import json
     body = await request.json()
     groups_data = body.get("groups", [])
 
@@ -1812,7 +1863,6 @@ async def submit_for_review(
     db: Session = Depends(get_db)
 ):
     """小组提交验收（需学号+手机验证）"""
-    import json
     body = await request.json()
     student_id = body.get("student_id", "")
     phone = body.get("phone", "")
@@ -1897,22 +1947,17 @@ async def supervisor_acceptance_panel(
     if not reg:
         raise HTTPException(404, "未找到报名记录")
 
-    group = db.query(RecruitmentGroup).filter(
-        RecruitmentGroup.recruitment_id == recruit_id,
-        RecruitmentGroup.is_supervisor == True
-    ).join(
-        RecruitmentGroupMember,
-        RecruitmentGroupMember.group_id == RecruitmentGroup.id
-    ).filter(
-        RecruitmentGroupMember.registration_id == reg.id
+    bs = db.query(BuildingSupervisor).filter(
+        BuildingSupervisor.recruitment_id == recruit_id,
+        BuildingSupervisor.registration_id == reg.id
     ).first()
-
-    if not group:
+    if not bs:
         raise HTTPException(403, "你不是楼栋负责人")
 
+    zone_name = bs.zone_name
     zone_groups = db.query(RecruitmentGroup).filter(
         RecruitmentGroup.recruitment_id == recruit_id,
-        RecruitmentGroup.zone_name == group.zone_name
+        RecruitmentGroup.zone_name == zone_name
     ).all()
 
     zone_group_ids = [g.id for g in zone_groups]
@@ -1946,7 +1991,7 @@ async def supervisor_acceptance_panel(
             "note": record.note if record else "",
         })
 
-    return {"code": 0, "data": result, "zone_name": group.zone_name}
+    return {"code": 0, "data": result, "zone_name": zone_name}
 
 
 @app.post("/api/acceptance/{rc_id}/review")
@@ -1956,7 +2001,6 @@ async def review_classroom(
     db: Session = Depends(get_db)
 ):
     """楼栋负责人/管理员验收或驳回"""
-    import json
     body = await request.json()
     action = body.get("action", "")
     note = body.get("note", "")
