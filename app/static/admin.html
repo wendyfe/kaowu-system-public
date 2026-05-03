@@ -1605,7 +1605,11 @@ async function loadGroupingData(recruitId) {
         renderGroupsTab();
         renderClassroomsTab();
     } catch (err) {
-        document.getElementById('tabGeneralContent').innerHTML = '<div class="text-danger text-center py-4">加载分组数据失败</div>';
+        const errHtml = '<div class="text-danger text-center py-4">加载分组数据失败</div>';
+        document.getElementById('tabGeneralContent').innerHTML = errHtml;
+        document.getElementById('tabSupervisorContent').innerHTML = errHtml;
+        document.getElementById('tabGroupsContent').innerHTML = errHtml;
+        document.getElementById('tabClassroomsContent').innerHTML = errHtml;
     }
 }
 
@@ -1960,7 +1964,7 @@ async function saveAllClassroomAssignments() {
 
 // Utility
 function getCsrf() {
-    return getCsrf();
+    return document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
 }
 
 // Finalize button

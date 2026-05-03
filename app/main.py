@@ -1429,7 +1429,8 @@ async def set_general_supervisor(
 
     recruit.general_supervisor_id = registration_id if registration_id and registration_id > 0 else None
     db.commit()
-    return {"code": 0, "msg": "总负责人已设置" if registration_id and registration_id > 0 else "总负责人已移除",
+    is_set = recruit.general_supervisor_id is not None
+    return {"code": 0, "msg": "总负责人已设置" if is_set else "总负责人已移除",
             "general_supervisor_id": recruit.general_supervisor_id}
 
 
@@ -1609,19 +1610,19 @@ async def finalize_grouping(request: Request, recruit_id: int, db: Session = Dep
 
     all_groups = db.query(RecruitmentGroup).filter(
         RecruitmentGroup.recruitment_id == recruit_id
-    ).all()
-    for g in all_groups:
+    ).order_by(RecruitmentGroup.id).all()
+    for idx, g in enumerate(all_groups, 1):
         cnt = db.query(RecruitmentGroupMember).filter(
             RecruitmentGroupMember.group_id == g.id
         ).count()
         if cnt == 0:
-            raise HTTPException(400, f"第{g.id}组没有成员，请先分配人员")
+            raise HTTPException(400, f"第{idx}组没有成员，请先分配人员")
 
         room_cnt = db.query(RecruitmentGroupClassroom).filter(
             RecruitmentGroupClassroom.group_id == g.id
         ).count()
         if room_cnt == 0:
-            raise HTTPException(400, f"第{g.id}组没有分配教室，请先在「分配教室」中分配")
+            raise HTTPException(400, f"第{idx}组没有分配教室，请先在「分配教室」中分配")
 
     init_task_progress(recruit_id, db)
     init_acceptance_records(recruit_id, db)
@@ -1674,41 +1675,6 @@ async def get_groups(request: Request, recruit_id: int, db: Session = Depends(ge
         })
 
     return {"code": 0, "data": result}
-
-
-@app.post("/api/recruit/{recruit_id}/save-groups")
-async def save_groups(request: Request, recruit_id: int, db: Session = Depends(get_db)):
-    """保存手动调整后的分组"""
-    check_admin_login(request)
-    check_csrf(request)
-
-    body = await request.json()
-    groups_data = body.get("groups", [])
-
-    existing_groups = db.query(RecruitmentGroup).filter(
-        RecruitmentGroup.recruitment_id == recruit_id
-    ).all()
-    for g in existing_groups:
-        db.query(RecruitmentGroupMember).filter(RecruitmentGroupMember.group_id == g.id).delete()
-        db.query(RecruitmentGroupClassroom).filter(RecruitmentGroupClassroom.group_id == g.id).delete()
-    db.query(RecruitmentGroup).filter(RecruitmentGroup.recruitment_id == recruit_id).delete()
-    db.flush()
-
-    for gd in groups_data:
-        group = RecruitmentGroup(
-            recruitment_id=recruit_id,
-            zone_name=gd.get("zone_name"),
-            is_supervisor=gd.get("is_supervisor", False),
-        )
-        db.add(group)
-        db.flush()
-        for rid in gd.get("member_ids", []):
-            db.add(RecruitmentGroupMember(group_id=group.id, registration_id=rid))
-        for rcid in gd.get("classroom_rc_ids", []):
-            db.add(RecruitmentGroupClassroom(group_id=group.id, recruitment_classroom_id=rcid))
-
-    db.commit()
-    return {"code": 0, "msg": "分组保存成功"}
 
 
 @app.post("/api/recruit/{recruit_id}/init-tasks")
