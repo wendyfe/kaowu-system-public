@@ -1635,6 +1635,21 @@ async function loadGroupingData(recruitId) {
         const res = await fetch(`/api/recruit/${recruitId}/manual-grouping-data`);
         if (!res.ok) throw new Error('加载失败');
         groupingData = await res.json();
+
+        if (groupingData.is_finalized) {
+            const alert = `<div class="alert alert-warning py-3 mb-0 text-center"><strong>⚠️ 分组已确认，任务清单和验收记录已生成，不可再修改分组</strong></div>`;
+            document.getElementById('tabGeneralContent').innerHTML = alert;
+            document.getElementById('tabSupervisorContent').innerHTML = alert;
+            document.getElementById('tabGroupsContent').innerHTML = alert;
+            document.getElementById('tabClassroomsContent').innerHTML = alert;
+            document.getElementById('btnSaveTab1').style.display = 'none';
+            document.getElementById('btnSaveTab2').style.display = 'none';
+            document.getElementById('btnSaveTab3').style.display = 'none';
+            document.getElementById('btnSaveTab4a').style.display = 'none';
+            document.getElementById('btnSaveTab4b').style.display = 'none';
+            return;
+        }
+
         renderGeneralTab();
         renderSupervisorTab();
         renderGroupsTab();

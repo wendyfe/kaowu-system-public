@@ -1396,6 +1396,12 @@ async def get_manual_grouping_data(recruit_id: int, db: Session = Depends(get_db
                 "exam_count": 2 if rc.exam_mode == "double" else 1,
             })
 
+    is_finalized = db.query(TaskProgress).join(
+        RecruitmentClassroom, TaskProgress.recruitment_classroom_id == RecruitmentClassroom.id
+    ).filter(
+        RecruitmentClassroom.recruitment_id == recruit_id
+    ).count() > 0
+
     return {
         "recruit_id": recruit_id,
         "general_supervisor_id": general,
@@ -1403,6 +1409,7 @@ async def get_manual_grouping_data(recruit_id: int, db: Session = Depends(get_db
         "registrations": reg_list,
         "groups": groups_data,
         "classrooms": classrooms_info,
+        "is_finalized": is_finalized,
     }
 
 
@@ -1415,6 +1422,7 @@ async def set_general_supervisor(
     """设置或移除总负责人"""
     check_admin_login(request)
     check_csrf(request)
+    _check_not_finalized(recruit_id, db)
 
     recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
     if not recruit:
@@ -1443,6 +1451,7 @@ async def set_building_supervisors(
     """批量设置楼栋负责人"""
     check_admin_login(request)
     check_csrf(request)
+    _check_not_finalized(recruit_id, db)
 
     body = await request.json()
     supervisors = body.get("supervisors", [])
@@ -1543,6 +1552,7 @@ async def auto_group(request: Request, recruit_id: int, db: Session = Depends(ge
     """自动分组：排除总负责人和楼栋负责人后，运行配对算法"""
     check_admin_login(request)
     check_csrf(request)
+    _check_not_finalized(recruit_id, db)
 
     recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
     if not recruit:
@@ -1599,6 +1609,7 @@ async def create_group(request: Request, recruit_id: int, db: Session = Depends(
     """创建新组"""
     check_admin_login(request)
     check_csrf(request)
+    _check_not_finalized(recruit_id, db)
 
     group = RecruitmentGroup(recruitment_id=recruit_id)
     db.add(group)
@@ -1612,6 +1623,7 @@ async def delete_group(request: Request, recruit_id: int, group_id: int, db: Ses
     """删除空组"""
     check_admin_login(request)
     check_csrf(request)
+    _check_not_finalized(recruit_id, db)
 
     group = db.query(RecruitmentGroup).filter(
         RecruitmentGroup.id == group_id,
@@ -1642,6 +1654,7 @@ async def set_group_members(
     """设置组成员（全量替换）"""
     check_admin_login(request)
     check_csrf(request)
+    _check_not_finalized(recruit_id, db)
 
     body = await request.json()
     member_ids = body.get("member_ids", [])
@@ -1682,6 +1695,7 @@ async def set_group_classrooms(
     """设置组负责的教室（全量替换，互斥检查）"""
     check_admin_login(request)
     check_csrf(request)
+    _check_not_finalized(recruit_id, db)
 
     body = await request.json()
     rc_ids = body.get("rc_ids", [])
@@ -1722,11 +1736,23 @@ async def set_group_classrooms(
     return {"code": 0, "msg": "教室已分配"}
 
 
+def _check_not_finalized(recruit_id: int, db: Session):
+    """如果已经 finalize 过，抛出 400 错误"""
+    count = db.query(TaskProgress).join(
+        RecruitmentClassroom, TaskProgress.recruitment_classroom_id == RecruitmentClassroom.id
+    ).filter(
+        RecruitmentClassroom.recruitment_id == recruit_id
+    ).count()
+    if count > 0:
+        raise HTTPException(400, "分组已确认并生成了任务清单，不可再修改分组")
+
+
 @app.post("/api/recruit/{recruit_id}/finalize-grouping")
 async def finalize_grouping(request: Request, recruit_id: int, db: Session = Depends(get_db)):
     """最终确认分组：初始化任务进度和验收记录"""
     check_admin_login(request)
     check_csrf(request)
+    _check_not_finalized(recruit_id, db)
 
     groups = db.query(RecruitmentGroup).filter(
         RecruitmentGroup.recruitment_id == recruit_id
