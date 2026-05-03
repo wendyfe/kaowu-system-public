@@ -1797,13 +1797,9 @@ function renderGroupsTab() {
 
     let html = '';
 
-    // Top toolbar — unified style
-    const btnStyle = 'border:none;border-radius:6px;padding:0.4rem 1rem;font-size:0.9rem';
+    // Top toolbar
     html += `<div class="d-flex align-items-center gap-2 mb-3">`;
-    html += `<button style="${btnStyle};background:#0d6efd;color:#fff" onclick="autoGroup()">🔄 自动分组</button>`;
-    if (data.groups.length > 0) {
-        html += `<button style="${btnStyle};background:#6c757d;color:#fff" onclick="autoGroup(true)">🔀 打散重分</button>`;
-    }
+    html += `<button style="border:none;border-radius:6px;padding:0.4rem 1rem;font-size:0.9rem;background:#0d6efd;color:#fff" onclick="autoGroup()">🔄 自动分组</button>`;
     html += `<span class="ms-2 text-muted small">共 <strong>${data.groups.length}</strong> 组 | <strong>${totalGrouped}</strong> 人已分组</span>`;
     html += `</div>`;
 
@@ -1870,10 +1866,8 @@ function renderGroupsTab() {
     });
 }
 
-async function autoGroup(reshuffle) {
-    if (reshuffle && groupingData.groups.length > 0) {
-        if (!await showConfirm('打散重分', '确定重新自动分组吗？所有现有分组和教室分配将被清除。')) return;
-    } else if (!reshuffle && groupingData.groups.length > 0) {
+async function autoGroup() {
+    if (groupingData.groups.length > 0) {
         if (!await showConfirm('自动分组', '当前已有分组，自动分组将覆盖所有现有分组和教室分配。确定继续？')) return;
     }
     const csrf = getCsrf();
