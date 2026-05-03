@@ -414,6 +414,8 @@
                     <button id="btnSaveTab1" class="btn" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.6rem 1.5rem;display:none" onclick="saveGeneralSupervisorAndNext()">💾 保存并进入步骤②</button>
                     <button id="btnSaveTab2" class="btn" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.6rem 1.5rem;display:none" onclick="saveBuildingSupervisorsAndNext()">💾 保存并进入步骤③</button>
                     <button id="btnSaveTab3" class="btn" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.6rem 1.5rem;display:none" onclick="saveGroupsAndNext()">💾 保存并进入步骤④</button>
+                    <button id="btnSaveTab4a" class="btn me-2" style="background:#0d6efd;color:#fff;border:none;border-radius:8px;padding:0.6rem 1.5rem;display:none" onclick="saveAllClassroomAssignments()">💾 保存教室分配</button>
+                    <button id="btnSaveTab4b" class="btn me-2" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.6rem 1.5rem;display:none" onclick="finalizeGrouping()">✅ 确认分组并创建任务</button>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
                 </div>
             </div>
@@ -1632,6 +1634,8 @@ async function loadGroupingData(recruitId) {
         document.getElementById('btnSaveTab1').style.display = 'none';
         document.getElementById('btnSaveTab2').style.display = 'none';
         document.getElementById('btnSaveTab3').style.display = 'none';
+        document.getElementById('btnSaveTab4a').style.display = 'none';
+        document.getElementById('btnSaveTab4b').style.display = 'none';
     }
 }
 
@@ -1659,6 +1663,8 @@ function renderGeneralTab() {
     document.getElementById('btnSaveTab1').style.display = '';
     document.getElementById('btnSaveTab2').style.display = 'none';
     document.getElementById('btnSaveTab3').style.display = 'none';
+    document.getElementById('btnSaveTab4a').style.display = 'none';
+    document.getElementById('btnSaveTab4b').style.display = 'none';
 }
 
 async function saveGeneralSupervisorAndNext() {
@@ -1729,6 +1735,8 @@ function renderSupervisorTab() {
     document.getElementById('btnSaveTab1').style.display = 'none';
     document.getElementById('btnSaveTab2').style.display = '';
     document.getElementById('btnSaveTab3').style.display = 'none';
+    document.getElementById('btnSaveTab4a').style.display = 'none';
+    document.getElementById('btnSaveTab4b').style.display = 'none';
 }
 
 async function saveBuildingSupervisors(silent) {
@@ -1842,6 +1850,8 @@ function renderGroupsTab() {
     document.getElementById('btnSaveTab1').style.display = 'none';
     document.getElementById('btnSaveTab2').style.display = 'none';
     document.getElementById('btnSaveTab3').style.display = '';
+    document.getElementById('btnSaveTab4a').style.display = 'none';
+    document.getElementById('btnSaveTab4b').style.display = 'none';
 
     poolSortable = new Sortable(document.getElementById('groupPool'), {
         group: 'grouping', animation: 150, sort: false,
@@ -2053,12 +2063,12 @@ function renderClassroomsTab() {
 
     html += `</div></div></div>`;
 
-    html += `<button class="btn btn-custom mt-2 me-2" onclick="saveAllClassroomAssignments()">💾 保存教室分配</button>`;
-    html += `<button class="btn btn-custom mt-2" id="finalizeGroupBtn" style="background:#198754" onclick="finalizeGrouping()">✅ 确认分组并创建任务</button>`;
     container.innerHTML = html;
     document.getElementById('btnSaveTab1').style.display = 'none';
     document.getElementById('btnSaveTab2').style.display = 'none';
     document.getElementById('btnSaveTab3').style.display = 'none';
+    document.getElementById('btnSaveTab4a').style.display = '';
+    document.getElementById('btnSaveTab4b').style.display = '';
 
     // Init SortableJS — exclude checkbox clicks from triggering drag
     const poolEl = document.getElementById('classroomPool');
