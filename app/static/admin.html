@@ -1940,16 +1940,13 @@ function renderClassroomsTab() {
         return;
     }
 
-    // Destroy old Sortable instances
     if (classroomPoolSortable) classroomPoolSortable.destroy();
     classroomGroupSortables.forEach(s => s.destroy());
     classroomGroupSortables = [];
 
-    // Calculate assigned classroom IDs across all groups
     const assignedRcIds = new Set();
     data.groups.forEach(g => g.classroom_rc_ids.forEach(rid => assignedRcIds.add(rid)));
 
-    // Group classrooms by zone
     const zoneClassrooms = {};
     data.classrooms.forEach(c => {
         if (!zoneClassrooms[c.zone]) zoneClassrooms[c.zone] = [];
@@ -1958,13 +1955,16 @@ function renderClassroomsTab() {
 
     let html = `<div class="row">`;
 
-    // LEFT: Classroom pool
+    // LEFT: Classroom pool (with checkboxes)
     html += `<div class="col-md-4">`;
-    html += `<div class="fw-bold mb-2">教室池（拖拽分配）</div>`;
+    html += `<div class="d-flex justify-content-between align-items-center mb-2">`;
+    html += `<span class="fw-bold">教室池</span>`;
+    html += `<small><a href="#" onclick="event.preventDefault();document.querySelectorAll('.classroom-select-cb').forEach(cb=>{cb.checked=true})">全选</a> / <a href="#" onclick="event.preventDefault();document.querySelectorAll('.classroom-select-cb').forEach(cb=>{cb.checked=false})">取消</a></small>`;
+    html += `</div>`;
     html += `<div id="classroomPool" class="border rounded p-2" style="min-height:200px;max-height:60vh;overflow-y:auto">`;
     let hasUnassigned = false;
     for (const [zone, classrooms] of Object.entries(zoneClassrooms)) {
-        html += `<div class="small text-muted mt-1 mb-1">${zone}</div>`;
+        html += `<div class="small text-muted mt-2 mb-1 fw-bold">${zone}</div>`;
         classrooms.forEach(c => {
             if (assignedRcIds.has(c.rc_id)) {
                 html += `<div class="border rounded p-2 mb-1 text-center" style="opacity:0.35;background:#eee" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}">`;
@@ -1972,9 +1972,10 @@ function renderClassroomsTab() {
                 html += `<div class="small text-muted">${c.exam_count}考场（已分配）</div></div>`;
             } else {
                 hasUnassigned = true;
-                html += `<div class="border rounded p-2 mb-1 bg-white classroom-card" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}" style="cursor:grab">`;
-                html += `<div class="small fw-bold">${c.name}</div>`;
-                html += `<div class="small text-muted">${c.exam_count}考场</div></div>`;
+                html += `<div class="border rounded p-2 mb-1 bg-white classroom-card" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}">`;
+                html += `<input type="checkbox" class="form-check-input me-1 classroom-select-cb" data-rc-id="${c.rc_id}" style="cursor:pointer" onclick="event.stopPropagation()">`;
+                html += `<strong class="small">${c.name}</strong>`;
+                html += `<span class="small text-muted ms-1">${c.exam_count}考场</span></div>`;
             }
         });
     }
@@ -1983,9 +1984,9 @@ function renderClassroomsTab() {
     }
     html += `</div></div>`;
 
-    // RIGHT: Group drop zones
+    // RIGHT: Group drop zones (with batch assign button)
     html += `<div class="col-md-8">`;
-    html += `<div class="fw-bold mb-2">组投放区（拖放教室到对应组）</div>`;
+    html += `<div class="fw-bold mb-2">组投放区（拖放或批量分配）</div>`;
     html += `<div style="max-height:60vh;overflow-y:auto">`;
 
     data.groups.forEach((g, idx) => {
@@ -1994,13 +1995,15 @@ function renderClassroomsTab() {
             return r ? r.name : '未知';
         }).join('、');
 
-        // Count currently assigned classrooms for this group
         const gRooms = data.classrooms.filter(c => g.classroom_rc_ids.includes(c.rc_id));
         const roomCount = gRooms.length;
         const examCount = gRooms.reduce((s, c) => s + c.exam_count, 0);
 
         html += `<div class="border rounded p-3 mb-3" data-group-id="${g.id}">`;
-        html += `<div class="fw-bold mb-1">第${idx+1}组：${memberNames || '（空组）'}</div>`;
+        html += `<div class="d-flex justify-content-between align-items-center mb-1">`;
+        html += `<span class="fw-bold">第${idx+1}组：${memberNames || '（空组）'}</span>`;
+        html += `<button class="btn btn-sm btn-outline-primary" onclick="batchAssignTo(${g.id})" title="将所有勾选的教室分配到本组">📥 接收已选</button>`;
+        html += `</div>`;
         html += `<div class="group-classroom-drop border rounded p-2" data-group-id="${g.id}" style="min-height:60px;border-style:dashed !important">`;
         gRooms.forEach(c => {
             html += `<div class="border rounded p-1 mb-1 bg-white small classroom-card" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}" style="cursor:grab;display:inline-block;margin:2px">`;
@@ -2009,7 +2012,7 @@ function renderClassroomsTab() {
             html += `</div>`;
         });
         if (gRooms.length === 0) {
-            html += `<div class="text-muted small text-center py-2">拖放教室到此处</div>`;
+            html += `<div class="text-muted small text-center py-2">拖放教室或点「接收已选」</div>`;
         }
         html += `</div>`;
         html += `<div class="small text-muted mt-1">📊 <span class="group-stats" data-group-id="${g.id}">${roomCount}间教室 → ${examCount}个考场</span></div>`;
@@ -2021,7 +2024,7 @@ function renderClassroomsTab() {
     html += `<button class="btn btn-custom mt-2" onclick="saveAllClassroomAssignments()">💾 保存教室分配</button>`;
     container.innerHTML = html;
 
-    // Init SortableJS
+    // Init SortableJS — exclude checkbox clicks from triggering drag
     const poolEl = document.getElementById('classroomPool');
     if (poolEl) {
         classroomPoolSortable = new Sortable(poolEl, {
@@ -2034,6 +2037,8 @@ function renderClassroomsTab() {
             },
             animation: 150,
             sort: false,
+            filter: '.classroom-select-cb',
+            preventOnFilter: false,
             onEnd: function() { updateAllGroupStats(); saveAllClassroomAssignments(); }
         });
     }
@@ -2052,6 +2057,42 @@ function renderClassroomsTab() {
         });
         classroomGroupSortables.push(s);
     });
+}
+
+function batchAssignTo(groupId) {
+    const checked = document.querySelectorAll('.classroom-select-cb:checked');
+    if (checked.length === 0) {
+        showToast('请先在教室池中勾选要分配的教室', 'warning');
+        return;
+    }
+    const dropZone = document.querySelector(`.group-classroom-drop[data-group-id="${groupId}"]`);
+    if (!dropZone) return;
+
+    checked.forEach(cb => {
+        const card = cb.closest('.classroom-card');
+        if (!card) return;
+        // Move to group drop zone
+        card.querySelector('.classroom-select-cb')?.remove(); // remove checkbox
+        card.style.cssText = 'cursor:grab;display:inline-block;margin:2px';
+        card.classList.remove('p-2', 'mb-1', 'bg-white');
+        card.classList.add('p-1', 'mb-1', 'small');
+        // Add remove button
+        const rcId = parseInt(card.dataset.rcId);
+        const btn = document.createElement('button');
+        btn.className = 'btn-close btn-close-sm ms-1';
+        btn.style.fontSize = '0.5rem';
+        btn.title = '移除';
+        btn.onclick = function(ev) { ev.stopPropagation(); unassignClassroom(rcId, groupId); };
+        card.appendChild(btn);
+        dropZone.appendChild(card);
+    });
+
+    // Remove empty placeholder if any
+    const placeholder = dropZone.querySelector('.text-muted');
+    if (placeholder && placeholder.textContent.includes('拖放教室')) placeholder.remove();
+
+    updateAllGroupStats();
+    saveAllClassroomAssignments();
 }
 
 function updateAllGroupStats() {
@@ -2084,7 +2125,6 @@ function updateAllGroupStats() {
 }
 
 async function unassignClassroom(rcId, groupId) {
-    // Remove from DOM, add back to pool, then save
     const card = document.querySelector(`.group-classroom-drop[data-group-id="${groupId}"] .classroom-card[data-rc-id="${rcId}"]`);
     if (card) {
         card.remove();
@@ -2096,7 +2136,7 @@ async function unassignClassroom(rcId, groupId) {
             newCard.dataset.rcId = rcId;
             newCard.dataset.examCount = cData ? cData.exam_count : 1;
             newCard.style.cursor = 'grab';
-            newCard.innerHTML = `<div class="small fw-bold">${cData ? cData.name : '教室'}</div><div class="small text-muted">${cData ? cData.exam_count : 1}考场</div>`;
+            newCard.innerHTML = `<input type="checkbox" class="form-check-input me-1 classroom-select-cb" data-rc-id="${rcId}" style="cursor:pointer" onclick="event.stopPropagation()"><strong class="small">${cData ? cData.name : '教室'}</strong><span class="small text-muted ms-1">${cData ? cData.exam_count : 1}考场</span>`;
             pool.appendChild(newCard);
         }
     }
