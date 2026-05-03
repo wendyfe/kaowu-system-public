@@ -299,10 +299,13 @@
 - 编辑侧滑面板增加验收配置区块（has_floor_supervisors）
 - **saveAllGroupMembers**：改为 Promise.all 等待所有请求 + 跨组重复检测 + 失败提示
 - **saveAllClassroomAssignments**：对所有组（含零勾选）发送 PUT 清理旧分配
-- **removeGeneralSupervisor**：不传 registration_id 参数触发后端置 null
+- **renderGeneralTab**：改为下拉选择（与楼栋负责人一致），选中 `（不指定）` 即可取消
+- **总负责人/楼栋负责人互斥**：前后端双重保障，设置总负责人时自动从楼栋负责人中移除
 - **renderSupervisorTab**：自动从考场推导楼栋分区，展示每个分区的教室列表 + 空值保护
 - **统一 CSRF 提取**：所有内联 cookie 解析替换为 getCsrf() 函数
 - **HTML 结构修正**：清除重复 closing div
+- **招募列表移除导出按钮**（查看报名弹窗内已有导出入口）
+- **confirm modal z-index 修正**：确保确认对话框出现在分组弹窗之上
 
 ### student.html
 - 报名表单新增性别字段
