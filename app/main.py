@@ -1517,6 +1517,17 @@ def auto_group_members(registrations, excluded_ids):
     if remaining:
         pairs.append([remaining.pop()])
 
+    # Post-process: random swaps ensure variety even with balanced buckets
+    if len(pairs) >= 2:
+        swaps = max(1, len(pairs) // 2)
+        for _ in range(swaps):
+            a = secrets.randbelow(len(pairs))
+            b = secrets.randbelow(len(pairs))
+            if a != b and pairs[a] and pairs[b]:
+                ai = secrets.randbelow(len(pairs[a]))
+                bi = secrets.randbelow(len(pairs[b]))
+                pairs[a][ai], pairs[b][bi] = pairs[b][bi], pairs[a][ai]
+
     return pairs
 
 
