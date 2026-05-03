@@ -473,6 +473,12 @@
                 };
                 modalEl.addEventListener('hidden.bs.modal', () => resolve(false), { once: true });
                 modal.show();
+                // 确保 confirm 弹窗始终在其他 modal 之上
+                modalEl.style.zIndex = '9990';
+                setTimeout(() => {
+                    const backdrop = document.querySelector('.modal-backdrop:last-of-type');
+                    if (backdrop) backdrop.style.zIndex = '9985';
+                }, 50);
             });
         }
 
@@ -693,13 +699,6 @@
                         viewRegistrations(item.id, item.exam_name);
                     };
                     tdActions.appendChild(viewLink);
-
-                    // 导出
-                    const exportLink = document.createElement("a");
-                    exportLink.href = `/api/export/${item.id}`;
-                    exportLink.className = 'action-link';
-                    exportLink.textContent = "导出Excel";
-                    tdActions.appendChild(exportLink);
 
                     // 分组
                     const groupLink = document.createElement("a");
@@ -1613,46 +1612,34 @@ async function loadGroupingData(recruitId) {
 function renderGeneralTab() {
     const container = document.getElementById('tabGeneralContent');
     const data = groupingData;
+
+    // Exclude current building supervisors from general supervisor candidates
+    const bsIds = new Set(data.supervisors.map(s => s.registration_id));
     const current = data.registrations.find(r => r.id === data.general_supervisor_id);
+
     let html = '';
     if (current) {
-        html += `<div class="alert alert-success py-2">当前总负责人：<strong>${current.name}</strong>（${current.gender}）<button class="btn btn-sm btn-outline-danger ms-2" onclick="removeGeneralSupervisor()">移除</button></div>`;
+        html += `<div class="alert alert-success py-2">当前总负责人：<strong>${current.name}</strong>（${current.gender}${current.has_experience ? ' ⭐有经验' : ''}）</div>`;
     } else {
         html += `<div class="alert alert-warning py-2">⚠️ 尚未设置总负责人，建议指定一位有经验的人员担任</div>`;
     }
-    html += `<div class="mb-2"><strong>从报名人员中选 1 人设为总负责人：</strong></div>`;
-    html += `<div class="d-flex flex-wrap gap-2">`;
+    html += `<div class="mb-2"><strong>选择总负责人（可选）：</strong></div>`;
+    html += `<select class="form-select" id="generalSupervisorSelect" style="max-width:400px" onchange="saveGeneralSupervisor(this.value)">`;
+    html += `<option value="">（不指定）</option>`;
     data.registrations.forEach(r => {
-        if (r.id === data.general_supervisor_id) return;
-        html += `<div class="border rounded p-2 text-center" style="width:140px;background:#f8f9fa">`;
-        html += `<div><strong>${r.name}</strong></div>`;
-        html += `<div class="small text-muted">${r.gender}${r.has_experience ? ' ⭐有经验' : ''}</div>`;
-        html += `<button class="btn btn-sm btn-outline-primary mt-1" onclick="setGeneralSupervisor(${r.id})">设为总负责人</button>`;
-        html += `</div>`;
+        if (bsIds.has(r.id)) return; // 已是楼栋负责人，不可兼任总负责人
+        const sel = r.id === data.general_supervisor_id ? 'selected' : '';
+        html += `<option value="${r.id}" ${sel}>${r.name}（${r.gender}${r.has_experience ? ' ⭐有经验' : ''}）</option>`;
     });
-    html += `</div>`;
+    html += `</select>`;
     container.innerHTML = html;
 }
 
-async function setGeneralSupervisor(regId) {
+async function saveGeneralSupervisor(regId) {
+    const csrf = getCsrf();
     const formData = new FormData();
-    formData.append('registration_id', regId);
-    const csrf = getCsrf();
+    if (regId) formData.append('registration_id', regId);
     try {
-        const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/general-supervisor`, {
-            method: 'PUT', body: formData, headers: { 'X-CSRF-Token': csrf }
-        });
-        const data = await res.json();
-        showToast(data.msg, 'success');
-        if (data.code === 0) await loadGroupingData(currentGroupingRecruitId);
-    } catch (err) { showToast('操作失败', 'danger'); }
-}
-
-async function removeGeneralSupervisor() {
-    const csrf = getCsrf();
-    try {
-        const formData = new FormData();
-        // 不传 registration_id，触发后端 Form(None) → 设置为 None (移除)
         const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/general-supervisor`, {
             method: 'PUT', body: formData, headers: { 'X-CSRF-Token': csrf }
         });
@@ -1801,6 +1788,7 @@ async function saveAllGroupMembers() {
     // Check for duplicate members across groups
     const allMembersByGroup = {};
     const seenAcrossGroups = new Map(); // regId -> groupId
+    let hasDuplicates = false;
     groups.forEach(area => {
         const groupId = parseInt(area.dataset.groupId);
         const memberIds = [];
@@ -1808,12 +1796,14 @@ async function saveAllGroupMembers() {
             const rid = parseInt(el.dataset.regId);
             memberIds.push(rid);
             if (seenAcrossGroups.has(rid) && seenAcrossGroups.get(rid) !== groupId) {
-                showToast(`${el.textContent.trim().split('（')[0]} 同时在多个组中，请先移出再分配`, 'warning');
+                showToast(`${el.textContent.trim().split('（')[0]} 在多个组中，请先移除`, 'warning');
+                hasDuplicates = true;
             }
             seenAcrossGroups.set(rid, groupId);
         });
         allMembersByGroup[groupId] = memberIds;
     });
+    if (hasDuplicates) return; // 阻止保存直至管理员修正
 
     for (const [groupId, memberIds] of Object.entries(allMembersByGroup)) {
         promises.push(

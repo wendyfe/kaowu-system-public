@@ -1426,6 +1426,11 @@ async def set_general_supervisor(
         ).first()
         if not reg:
             raise HTTPException(400, "该报名记录不存在或不在此招募中")
+        # 互斥：从楼栋负责人中移除（总负责人不应兼任楼栋负责人）
+        db.query(BuildingSupervisor).filter(
+            BuildingSupervisor.recruitment_id == recruit_id,
+            BuildingSupervisor.registration_id == registration_id
+        ).delete(synchronize_session=False)
 
     recruit.general_supervisor_id = registration_id if registration_id and registration_id > 0 else None
     db.commit()
