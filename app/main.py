@@ -20,6 +20,7 @@ from email.mime.text import MIMEText
 from email.header import Header
 from email.utils import formataddr
 import random
+import secrets
 import string
 import time
 import json
@@ -1468,6 +1469,13 @@ async def set_building_supervisors(
     return {"code": 0, "msg": "楼栋负责人已保存"}
 
 
+def _secure_shuffle(lst):
+    """Fisher-Yates shuffle using secrets module for true randomness."""
+    for i in range(len(lst) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        lst[i], lst[j] = lst[j], lst[i]
+
+
 def auto_group_members(registrations, excluded_ids):
     """四人桶配对算法：尽量 2 人一组，经验混搭、性别混搭，允许落单。"""
     buckets = {"exp_male": [], "exp_female": [], "new_male": [], "new_female": []}
@@ -1479,7 +1487,7 @@ def auto_group_members(registrations, excluded_ids):
         buckets[f"{exp}_{gender}"].append(r.id)
 
     for key in buckets:
-        random.shuffle(buckets[key])
+        _secure_shuffle(buckets[key])
 
     pairs = []
 
@@ -1501,7 +1509,7 @@ def auto_group_members(registrations, excluded_ids):
     remaining = []
     for key in buckets:
         remaining.extend(buckets[key])
-    random.shuffle(remaining)
+    _secure_shuffle(remaining)
     while len(remaining) >= 2:
         pairs.append([remaining.pop(), remaining.pop()])
 
