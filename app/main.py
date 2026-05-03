@@ -1491,14 +1491,21 @@ def auto_group_members(registrations, excluded_ids):
 
     pairs = []
 
-    # Phase 1: 同性别跨经验
-    for g in ("male", "female"):
-        exp_list = buckets[f"exp_{g}"]
-        new_list = buckets[f"new_{g}"]
-        while exp_list and new_list:
-            pairs.append([exp_list.pop(), new_list.pop()])
+    # Phase 1: 跨经验（最高优先级，不限性别）
+    all_exp = buckets["exp_male"] + buckets["exp_female"]
+    all_new = buckets["new_male"] + buckets["new_female"]
+    _secure_shuffle(all_exp)
+    _secure_shuffle(all_new)
+    used = set()
+    while all_exp and all_new:
+        pairs.append([all_exp.pop(), all_new.pop()])
+        used.add(pairs[-1][0])
+        used.add(pairs[-1][1])
+    # 从原始桶中移除已配对的
+    for key in buckets:
+        buckets[key] = [x for x in buckets[key] if x not in used]
 
-    # Phase 2: 同经验跨性别
+    # Phase 2: 同经验跨性别（次优先级）
     for e in ("exp", "new"):
         male_list = buckets[f"{e}_male"]
         female_list = buckets[f"{e}_female"]
