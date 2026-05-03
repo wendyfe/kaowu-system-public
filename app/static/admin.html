@@ -1649,8 +1649,13 @@ function renderGeneralTab() {
         html += `<option value="${r.id}" ${sel}>${r.name}（${r.gender}${r.has_experience ? ' ⭐有经验' : ''}）</option>`;
     });
     html += `</select>`;
-    html += `<button class="btn btn-custom mt-2" onclick="saveGeneralSupervisor(document.getElementById('generalSupervisorSelect').value)">保存总负责人</button>`;
+    html += `<button class="btn mt-2" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.8rem 2rem;font-size:1rem" onclick="saveGeneralSupervisorAndNext()">💾 保存并下一步 ②</button>`;
     container.innerHTML = html;
+}
+
+async function saveGeneralSupervisorAndNext() {
+    const ok = await saveGeneralSupervisor(document.getElementById('generalSupervisorSelect').value);
+    if (ok) switchGroupingTab('tab-supervisor-tab');
 }
 
 async function saveGeneralSupervisor(regId) {
@@ -1662,10 +1667,11 @@ async function saveGeneralSupervisor(regId) {
             method: 'PUT', body: formData, headers: { 'X-CSRF-Token': csrf }
         });
         const data = await res.json();
-        if (!res.ok) { showToast(data.detail || '操作失败', 'danger'); return; }
+        if (!res.ok) { showToast(data.detail || '操作失败', 'danger'); return false; }
         showToast(data.msg, 'success');
         await loadGroupingData(currentGroupingRecruitId);
-    } catch (err) { showToast('操作失败', 'danger'); }
+        return true;
+    } catch (err) { showToast('操作失败', 'danger'); return false; }
 }
 
 function renderSupervisorTab() {
@@ -1711,11 +1717,11 @@ function renderSupervisorTab() {
     });
 
     html += `</div>`;
-    html += `<button class="btn btn-custom mt-3" onclick="saveBuildingSupervisors()">保存楼栋负责人</button>`;
+    html += `<button class="btn mt-3" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.8rem 2rem;font-size:1rem" onclick="saveBuildingSupervisorsAndNext()">💾 保存并下一步 ③</button>`;
     container.innerHTML = html;
 }
 
-async function saveBuildingSupervisors() {
+async function saveBuildingSupervisors(silent) {
     const selects = document.querySelectorAll('.zone-supervisor-select');
     const supervisors = [];
     selects.forEach(sel => {
@@ -1733,10 +1739,16 @@ async function saveBuildingSupervisors() {
             body: JSON.stringify({ supervisors }),
         });
         const data = await res.json();
-        if (!res.ok) { showToast(data.detail || '保存失败', 'danger'); return; }
-        showToast(data.msg, 'success');
+        if (!res.ok) { showToast(data.detail || '保存失败', 'danger'); return false; }
+        if (!silent) showToast(data.msg, 'success');
         await loadGroupingData(currentGroupingRecruitId);
-    } catch (err) { showToast('保存失败', 'danger'); }
+        return true;
+    } catch (err) { showToast('保存失败', 'danger'); return false; }
+}
+
+async function saveBuildingSupervisorsAndNext() {
+    const ok = await saveBuildingSupervisors();
+    if (ok) switchGroupingTab('tab-groups-tab');
 }
 
 function renderGroupsTab() {
@@ -1758,11 +1770,12 @@ function renderGroupsTab() {
 
     let html = '';
 
-    // Top toolbar
+    // Top toolbar — unified style
+    const btnStyle = 'border:none;border-radius:6px;padding:0.4rem 1rem;font-size:0.9rem';
     html += `<div class="d-flex align-items-center gap-2 mb-3">`;
-    html += `<button class="btn btn-custom" onclick="autoGroup()">🔄 自动分组</button>`;
+    html += `<button style="${btnStyle};background:#0d6efd;color:#fff" onclick="autoGroup()">🔄 自动分组</button>`;
     if (data.groups.length > 0) {
-        html += `<button class="btn btn-outline-secondary" onclick="autoGroup(true)">🔀 打散重分</button>`;
+        html += `<button style="${btnStyle};background:#6c757d;color:#fff" onclick="autoGroup(true)">🔀 打散重分</button>`;
     }
     html += `<span class="ms-2 text-muted small">共 <strong>${data.groups.length}</strong> 组 | <strong>${totalGrouped}</strong> 人已分组</span>`;
     html += `</div>`;
@@ -1815,6 +1828,9 @@ function renderGroupsTab() {
 
     html += `</div></div></div>`;
 
+    // Save button at bottom — same position as Tabs 1,2,4
+    html += `<button class="btn mt-2" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.8rem 2rem;font-size:1rem" onclick="saveGroupsAndNext()">💾 保存并下一步 ④</button>`;
+
     container.innerHTML = html;
 
     poolSortable = new Sortable(document.getElementById('groupPool'), {
@@ -1824,7 +1840,7 @@ function renderGroupsTab() {
     document.querySelectorAll('.group-members-area').forEach(area => {
         const s = new Sortable(area, {
             group: 'grouping', animation: 150,
-            onEnd: function() { saveAllGroupMembers(); }
+            onEnd: function() { saveAllGroupMembers(true); }
         });
         groupsSortables.push(s);
     });
@@ -1848,7 +1864,7 @@ async function autoGroup(reshuffle) {
     } catch (err) { showToast('自动分组失败', 'danger'); }
 }
 
-async function saveAllGroupMembers() {
+async function saveAllGroupMembers(silent) {
     const csrf = getCsrf();
     const groups = document.querySelectorAll('.group-members-area');
     const promises = [];
@@ -1887,13 +1903,20 @@ async function saveAllGroupMembers() {
         const failed = results.filter(r => !r.ok);
         if (failed.length > 0) {
             showToast(`保存失败：${failed.map(f => f.data.detail || '未知错误').join('；')}`, 'danger');
-            return;
+            return false;
         }
-        showToast('分组已保存', 'success');
+        if (!silent) showToast('分组已保存', 'success');
         await loadGroupingData(currentGroupingRecruitId);
+        return true;
     } catch (err) {
         showToast('保存失败，请重试', 'danger');
+        return false;
     }
+}
+
+async function saveGroupsAndNext() {
+    const ok = await saveAllGroupMembers(false);
+    if (ok) switchGroupingTab('tab-classrooms-tab');
 }
 
 async function createNewGroup() {
@@ -2191,6 +2214,11 @@ async function saveAllClassroomAssignments() {
 // Utility
 function getCsrf() {
     return document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
+}
+
+function switchGroupingTab(tabId) {
+    const tab = document.getElementById(tabId);
+    if (tab) bootstrap.Tab.getOrCreateInstance(tab).show();
 }
 
 async function finalizeGrouping() {
