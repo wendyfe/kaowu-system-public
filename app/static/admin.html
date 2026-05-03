@@ -277,8 +277,9 @@
                     <tbody></tbody>
                 </table>
             </div>
-            </div>
-        </div>
+            </div><!-- /.col-12 -->
+        </div><!-- /.row -->
+    </div><!-- /.card p-5 -->
             </div><!-- /.container -->
         </div><!-- /content-wrapper -->
     </div><!-- /recruit-panel -->
@@ -592,9 +593,10 @@
                     throw err;
                 }
                 const data = await res.json();
+                if (!res.ok) { showToast(data.detail || '修改失败', 'danger'); return; }
                 showToast(data.msg, 'success');
                 editOffcanvas.hide();
-                if (data.code === 0) loadRecruitList();
+                loadRecruitList();
             } catch (err) {
                 showToast(err.detail || '修改失败', 'danger');
             }
@@ -836,13 +838,12 @@
             try {
                 const res = await fetch(`/api/recruit/${id}/toggle`, {
                     method: "POST",
-                    headers: {
-                        "X-CSRF-Token": getCsrf()
-                    }
+                    headers: { "X-CSRF-Token": getCsrf() }
                 });
                 const data = await res.json();
+                if (!res.ok) { showToast(data.detail || '操作失败', 'danger'); return; }
                 showToast(data.msg, 'success');
-                if (data.code === 0) loadRecruitList();
+                loadRecruitList();
             } catch (err) {
                 showToast("操作失败，请重试", 'danger');
             }
@@ -855,13 +856,12 @@
             try {
                 const res = await fetch(`/api/recruit/${id}`, {
                     method: "DELETE",
-                    headers: {
-                        "X-CSRF-Token": getCsrf()
-                    }
+                    headers: { "X-CSRF-Token": getCsrf() }
                 });
                 const data = await res.json();
+                if (!res.ok) { showToast(data.detail || '删除失败', 'danger'); return; }
                 showToast(data.msg, 'success');
-                if (data.code === 0) loadRecruitList();
+                loadRecruitList();
             } catch (err) {
                 showToast("删除失败，请重试", 'danger');
             }
@@ -922,13 +922,12 @@
                     }
                 });
                 const data = await res.json();
-                showToast(data.msg, data.code === 0 ? 'success' : 'danger');
-                if (data.code === 0) {
-                    e.target.reset();
-                    publishSelections = {};
-                    publishPicker.clear(); // 同时清空日期选择器
-                    loadRecruitList();
-                }
+                if (!res.ok) { showToast(data.detail || '发布失败', 'danger'); return; }
+                showToast(data.msg, 'success');
+                e.target.reset();
+                publishSelections = {};
+                publishPicker.clear();
+                loadRecruitList();
             } catch (err) {
                 showToast("发布失败，请重试", 'danger');
             } finally {
@@ -1099,8 +1098,9 @@
                                 headers: { 'X-CSRF-Token': getCsrf() }
                             });
                             const data = await res.json();
-                            showToast(data.msg, data.code === 0 ? 'success' : 'danger');
-                            if (data.code === 0) loadClassroomList();
+                            if (!res.ok) { showToast(data.detail || '操作失败', 'danger'); return; }
+                            showToast(data.msg, 'success');
+                            loadClassroomList();
                         } catch (err) {
                             showToast('操作失败', 'danger');
                         }
@@ -1116,8 +1116,9 @@
                                 headers: { 'X-CSRF-Token': getCsrf() }
                             });
                             const data = await res.json();
-                            showToast(data.msg, data.code === 0 ? 'success' : 'danger');
-                            if (data.code === 0) loadClassroomList();
+                            if (!res.ok) { showToast(data.detail || '删除失败', 'danger'); return; }
+                            showToast(data.msg, 'success');
+                            loadClassroomList();
                         } catch (err) {
                             showToast('删除失败', 'danger');
                         }
@@ -1125,6 +1126,8 @@
                 });
             } catch (err) {
                 console.error('加载教室列表失败', err);
+                document.getElementById('classroomList').innerHTML =
+                    '<div class="text-danger text-center py-4">加载教室列表失败，请刷新重试</div>';
                 showToast('加载教室列表失败', 'danger');
             }
         }
@@ -1147,12 +1150,11 @@
                     headers: { 'X-CSRF-Token': csrf }
                 });
                 const data = await res.json();
-                showToast(data.msg, data.code === 0 ? 'success' : 'danger');
-                if (data.code === 0) {
-                    fileInput.value = '';
-                    loadClassroomList();
-                    loadBuildingSelect('formBuildingId');
-                }
+                if (!res.ok) { showToast(data.detail || '导入失败', 'danger'); return; }
+                showToast(data.msg, 'success');
+                fileInput.value = '';
+                loadClassroomList();
+                loadBuildingSelect('formBuildingId');
             } catch (err) {
                 showToast('导入失败', 'danger');
             }
@@ -1207,11 +1209,10 @@
                     headers: { 'X-CSRF-Token': csrf }
                 });
                 const data = await res.json();
-                showToast(data.msg, data.code === 0 ? 'success' : 'danger');
-                if (data.code === 0) {
-                    bootstrap.Modal.getInstance(document.getElementById('classroomModal')).hide();
-                    loadClassroomList();
-                }
+                if (!res.ok) { showToast(data.detail || '保存失败', 'danger'); return; }
+                showToast(data.msg, 'success');
+                bootstrap.Modal.getInstance(document.getElementById('classroomModal')).hide();
+                loadClassroomList();
             } catch (err) {
                 showToast('保存失败', 'danger');
             }
@@ -1626,13 +1627,14 @@ function renderGeneralTab() {
         html += `<div class="alert alert-warning py-2">⚠️ 尚未设置总负责人，建议指定一位有经验的人员担任</div>`;
     }
     html += `<div class="mb-2"><strong>选择总负责人（可选，允许同时担任楼栋负责人）：</strong></div>`;
-    html += `<select class="form-select" id="generalSupervisorSelect" style="max-width:400px" onchange="saveGeneralSupervisor(this.value)">`;
+    html += `<select class="form-select" id="generalSupervisorSelect" style="max-width:400px">`;
     html += `<option value="">（不指定）</option>`;
     data.registrations.forEach(r => {
         const sel = r.id === data.general_supervisor_id ? 'selected' : '';
         html += `<option value="${r.id}" ${sel}>${r.name}（${r.gender}${r.has_experience ? ' ⭐有经验' : ''}）</option>`;
     });
     html += `</select>`;
+    html += `<button class="btn btn-custom mt-2" onclick="saveGeneralSupervisor(document.getElementById('generalSupervisorSelect').value)">保存总负责人</button>`;
     container.innerHTML = html;
 }
 
@@ -1645,8 +1647,9 @@ async function saveGeneralSupervisor(regId) {
             method: 'PUT', body: formData, headers: { 'X-CSRF-Token': csrf }
         });
         const data = await res.json();
+        if (!res.ok) { showToast(data.detail || '操作失败', 'danger'); return; }
         showToast(data.msg, 'success');
-        if (data.code === 0) await loadGroupingData(currentGroupingRecruitId);
+        await loadGroupingData(currentGroupingRecruitId);
     } catch (err) { showToast('操作失败', 'danger'); }
 }
 
@@ -1715,8 +1718,9 @@ async function saveBuildingSupervisors() {
             body: JSON.stringify({ supervisors }),
         });
         const data = await res.json();
+        if (!res.ok) { showToast(data.detail || '保存失败', 'danger'); return; }
         showToast(data.msg, 'success');
-        if (data.code === 0) await loadGroupingData(currentGroupingRecruitId);
+        await loadGroupingData(currentGroupingRecruitId);
     } catch (err) { showToast('保存失败', 'danger'); }
 }
 
@@ -1822,9 +1826,10 @@ async function saveAllGroupMembers() {
         const failed = results.filter(r => !r.ok);
         if (failed.length > 0) {
             showToast(`保存失败：${failed.map(f => f.data.detail || '未知错误').join('；')}`, 'danger');
-        } else {
-            showToast('分组已保存', 'success');
+            return;
         }
+        showToast('分组已保存', 'success');
+        await loadGroupingData(currentGroupingRecruitId);
     } catch (err) {
         showToast('保存失败，请重试', 'danger');
     }
@@ -1837,7 +1842,9 @@ async function createNewGroup() {
             method: 'POST', headers: { 'X-CSRF-Token': csrf }
         });
         const data = await res.json();
-        if (data.code === 0) await loadGroupingData(currentGroupingRecruitId);
+        if (!res.ok) { showToast(data.detail || '创建失败', 'danger'); return; }
+        showToast('新组已创建', 'success');
+        await loadGroupingData(currentGroupingRecruitId);
     } catch (err) { showToast('创建失败', 'danger'); }
 }
 
@@ -1849,8 +1856,9 @@ async function deleteGroup(groupId) {
             method: 'DELETE', headers: { 'X-CSRF-Token': csrf }
         });
         const data = await res.json();
-        showToast(data.msg, data.code === 0 ? 'success' : 'danger');
-        if (data.code === 0) await loadGroupingData(currentGroupingRecruitId);
+        if (!res.ok) { showToast(data.detail || '删除失败', 'danger'); return; }
+        showToast(data.msg, 'success');
+        await loadGroupingData(currentGroupingRecruitId);
     } catch (err) { showToast('删除失败', 'danger'); }
 }
 
@@ -1954,9 +1962,10 @@ async function saveAllClassroomAssignments() {
         const failed = results.filter(r => !r.ok);
         if (failed.length > 0) {
             showToast(`保存失败：${failed.map(f => f.data.detail || '未知错误').join('；')}`, 'danger');
-        } else {
-            showToast('教室分配已保存', 'success');
+            return;
         }
+        showToast('教室分配已保存', 'success');
+        await loadGroupingData(currentGroupingRecruitId);
     } catch (err) {
         showToast('保存失败，请重试', 'danger');
     }
@@ -1977,8 +1986,9 @@ document.getElementById('finalizeGroupBtn')?.addEventListener('click', async () 
             method: 'POST', headers: { 'X-CSRF-Token': csrf }
         });
         const data = await res.json();
-        showToast(data.msg || data.detail, data.code === 0 ? 'success' : 'danger');
-        if (data.code === 0) bootstrap.Modal.getInstance(document.getElementById('groupingModal')).hide();
+        if (!res.ok) { showToast(data.detail || '操作失败', 'danger'); return; }
+        showToast(data.msg, 'success');
+        bootstrap.Modal.getInstance(document.getElementById('groupingModal')).hide();
     } catch (err) { showToast('操作失败', 'danger'); }
 });
 
@@ -2059,8 +2069,9 @@ document.getElementById('sealAllBtn')?.addEventListener('click', async () => {
             headers: { 'X-CSRF-Token': csrf }
         });
         const data = await res.json();
-        showToast(data.msg || data.detail, data.code === 0 ? 'success' : 'danger');
-        if (data.code === 0) await loadAcceptanceData(currentAcceptRecruitId);
+        if (!res.ok) { showToast(data.detail || '操作失败', 'danger'); return; }
+        showToast(data.msg, 'success');
+        await loadAcceptanceData(currentAcceptRecruitId);
     } catch (err) {
         showToast('操作失败', 'danger');
     }
@@ -2135,8 +2146,9 @@ document.getElementById('initRecoveryBtn')?.addEventListener('click', async () =
             headers: { 'X-CSRF-Token': csrf }
         });
         const data = await res.json();
-        showToast(data.msg || data.detail, data.code === 0 ? 'success' : 'danger');
-        if (data.code === 0) await loadRecoveryProgress(currentRecoveryRecruitId);
+        if (!res.ok) { showToast(data.detail || '操作失败', 'danger'); return; }
+        showToast(data.msg, 'success');
+        await loadRecoveryProgress(currentRecoveryRecruitId);
     } catch (err) {
         showToast('操作失败', 'danger');
     }
