@@ -1468,6 +1468,106 @@ async def set_building_supervisors(
     return {"code": 0, "msg": "楼栋负责人已保存"}
 
 
+def auto_group_members(registrations, excluded_ids):
+    """四人桶配对算法：尽量 2 人一组，经验混搭、性别混搭，允许落单。"""
+    buckets = {"exp_male": [], "exp_female": [], "new_male": [], "new_female": []}
+    for r in registrations:
+        if r.id in excluded_ids:
+            continue
+        exp = "exp" if r.has_experience else "new"
+        gender = "male" if r.gender == "男" else "female"
+        buckets[f"{exp}_{gender}"].append(r.id)
+
+    for key in buckets:
+        random.shuffle(buckets[key])
+
+    pairs = []
+
+    # Phase 1: 同性别跨经验
+    for g in ("male", "female"):
+        exp_list = buckets[f"exp_{g}"]
+        new_list = buckets[f"new_{g}"]
+        while exp_list and new_list:
+            pairs.append([exp_list.pop(), new_list.pop()])
+
+    # Phase 2: 同经验跨性别
+    for e in ("exp", "new"):
+        male_list = buckets[f"{e}_male"]
+        female_list = buckets[f"{e}_female"]
+        while male_list and female_list:
+            pairs.append([male_list.pop(), female_list.pop()])
+
+    # Phase 3: 剩余混合
+    remaining = []
+    for key in buckets:
+        remaining.extend(buckets[key])
+    random.shuffle(remaining)
+    while len(remaining) >= 2:
+        pairs.append([remaining.pop(), remaining.pop()])
+
+    # Phase 4: 落单
+    if remaining:
+        pairs.append([remaining.pop()])
+
+    return pairs
+
+
+@app.post("/api/recruit/{recruit_id}/auto-group")
+async def auto_group(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    """自动分组：排除总负责人和楼栋负责人后，运行配对算法"""
+    check_admin_login(request)
+    check_csrf(request)
+
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    excluded_ids = set()
+    if recruit.general_supervisor_id:
+        excluded_ids.add(recruit.general_supervisor_id)
+    for bs in db.query(BuildingSupervisor).filter(
+        BuildingSupervisor.recruitment_id == recruit_id
+    ).all():
+        excluded_ids.add(bs.registration_id)
+
+    regs = db.query(Registration).filter(
+        Registration.recruitment_id == recruit_id
+    ).all()
+    if excluded_ids:
+        regs = [r for r in regs if r.id not in excluded_ids]
+    if not regs:
+        raise HTTPException(400, "没有可分组的人员（所有人都已被指定为负责人）")
+
+    pairs = auto_group_members(regs, excluded_ids)
+
+    existing_ids = [
+        g.id for g in db.query(RecruitmentGroup).filter(
+            RecruitmentGroup.recruitment_id == recruit_id
+        ).all()
+    ]
+    if existing_ids:
+        db.query(RecruitmentGroupMember).filter(
+            RecruitmentGroupMember.group_id.in_(existing_ids)
+        ).delete(synchronize_session=False)
+        db.query(RecruitmentGroupClassroom).filter(
+            RecruitmentGroupClassroom.group_id.in_(existing_ids)
+        ).delete(synchronize_session=False)
+        db.query(RecruitmentGroup).filter(
+            RecruitmentGroup.id.in_(existing_ids)
+        ).delete(synchronize_session=False)
+    db.flush()
+
+    for pair in pairs:
+        group = RecruitmentGroup(recruitment_id=recruit_id)
+        db.add(group)
+        db.flush()
+        for rid in pair:
+            db.add(RecruitmentGroupMember(group_id=group.id, registration_id=rid))
+
+    db.commit()
+    return {"code": 0, "msg": f"已自动分成 {len(pairs)} 组", "group_count": len(pairs)}
+
+
 @app.post("/api/recruit/{recruit_id}/groups")
 async def create_group(request: Request, recruit_id: int, db: Session = Depends(get_db)):
     """创建新组"""
