@@ -1881,7 +1881,10 @@ async function autoGroup(reshuffle) {
         if (!res.ok) { showToast(data.detail || '操作失败', 'danger'); return; }
         showToast(data.msg, 'success');
         await loadGroupingData(currentGroupingRecruitId);
-    } catch (err) { showToast('自动分组失败', 'danger'); }
+    } catch (err) {
+        console.error('autoGroup failed:', err);
+        showToast('自动分组失败', 'danger');
+    }
 }
 
 async function saveAllGroupMembers(silent) {
