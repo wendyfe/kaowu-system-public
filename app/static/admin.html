@@ -411,6 +411,9 @@
                     </div>
                 </div>
                 <div class="modal-footer">
+                    <button id="btnSaveTab1" class="btn" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.6rem 1.5rem;display:none" onclick="saveGeneralSupervisorAndNext()">💾 保存并进入步骤②</button>
+                    <button id="btnSaveTab2" class="btn" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.6rem 1.5rem;display:none" onclick="saveBuildingSupervisorsAndNext()">💾 保存并进入步骤③</button>
+                    <button id="btnSaveTab3" class="btn" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.6rem 1.5rem;display:none" onclick="saveGroupsAndNext()">💾 保存并进入步骤④</button>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
                 </div>
             </div>
@@ -1626,6 +1629,9 @@ async function loadGroupingData(recruitId) {
         document.getElementById('tabSupervisorContent').innerHTML = errHtml;
         document.getElementById('tabGroupsContent').innerHTML = errHtml;
         document.getElementById('tabClassroomsContent').innerHTML = errHtml;
+        document.getElementById('btnSaveTab1').style.display = 'none';
+        document.getElementById('btnSaveTab2').style.display = 'none';
+        document.getElementById('btnSaveTab3').style.display = 'none';
     }
 }
 
@@ -1649,8 +1655,10 @@ function renderGeneralTab() {
         html += `<option value="${r.id}" ${sel}>${r.name}（${r.gender}${r.has_experience ? ' ⭐有经验' : ''}）</option>`;
     });
     html += `</select>`;
-    html += `<button class="btn mt-2" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.8rem 2rem;font-size:1rem" onclick="saveGeneralSupervisorAndNext()">💾 保存并下一步 ②</button>`;
     container.innerHTML = html;
+    document.getElementById('btnSaveTab1').style.display = '';
+    document.getElementById('btnSaveTab2').style.display = 'none';
+    document.getElementById('btnSaveTab3').style.display = 'none';
 }
 
 async function saveGeneralSupervisorAndNext() {
@@ -1717,8 +1725,10 @@ function renderSupervisorTab() {
     });
 
     html += `</div>`;
-    html += `<button class="btn mt-3" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.8rem 2rem;font-size:1rem" onclick="saveBuildingSupervisorsAndNext()">💾 保存并下一步 ③</button>`;
     container.innerHTML = html;
+    document.getElementById('btnSaveTab1').style.display = 'none';
+    document.getElementById('btnSaveTab2').style.display = '';
+    document.getElementById('btnSaveTab3').style.display = 'none';
 }
 
 async function saveBuildingSupervisors(silent) {
@@ -1828,10 +1838,10 @@ function renderGroupsTab() {
 
     html += `</div></div></div>`;
 
-    // Save button at bottom — same position as Tabs 1,2,4
-    html += `<button class="btn mt-2" style="background:#198754;color:#fff;border:none;border-radius:8px;padding:0.8rem 2rem;font-size:1rem" onclick="saveGroupsAndNext()">💾 保存并下一步 ④</button>`;
-
     container.innerHTML = html;
+    document.getElementById('btnSaveTab1').style.display = 'none';
+    document.getElementById('btnSaveTab2').style.display = 'none';
+    document.getElementById('btnSaveTab3').style.display = '';
 
     poolSortable = new Sortable(document.getElementById('groupPool'), {
         group: 'grouping', animation: 150, sort: false,
@@ -2046,6 +2056,9 @@ function renderClassroomsTab() {
     html += `<button class="btn btn-custom mt-2 me-2" onclick="saveAllClassroomAssignments()">💾 保存教室分配</button>`;
     html += `<button class="btn btn-custom mt-2" id="finalizeGroupBtn" style="background:#198754" onclick="finalizeGrouping()">✅ 确认分组并创建任务</button>`;
     container.innerHTML = html;
+    document.getElementById('btnSaveTab1').style.display = 'none';
+    document.getElementById('btnSaveTab2').style.display = 'none';
+    document.getElementById('btnSaveTab3').style.display = 'none';
 
     // Init SortableJS — exclude checkbox clicks from triggering drag
     const poolEl = document.getElementById('classroomPool');
