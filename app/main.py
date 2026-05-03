@@ -1724,6 +1724,17 @@ async def finalize_grouping(request: Request, recruit_id: int, db: Session = Dep
         if room_cnt == 0:
             raise HTTPException(400, f"第{idx}组没有分配教室，请先在「分配教室」中分配")
 
+    total_classrooms = db.query(func.count(RecruitmentClassroom.id)).filter(
+        RecruitmentClassroom.recruitment_id == recruit_id
+    ).scalar()
+    assigned_classrooms = db.query(func.count(RecruitmentGroupClassroom.id)).join(
+        RecruitmentGroup, RecruitmentGroupClassroom.group_id == RecruitmentGroup.id
+    ).filter(
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).scalar()
+    if assigned_classrooms < total_classrooms:
+        raise HTTPException(400, f"还有 {total_classrooms - assigned_classrooms} 间教室未分配，请将所有教室分配到对应组后再确认")
+
     init_task_progress(recruit_id, db)
     init_acceptance_records(recruit_id, db)
     return {"code": 0, "msg": "分组已确认，任务清单和验收记录已创建"}
@@ -1984,8 +1995,10 @@ async def submit_for_review(
 
     if record.status == "passed":
         raise HTTPException(400, "该考场已验收通过")
+    if record.status == "sealed":
+        raise HTTPException(400, "该考场已封门，不可操作")
 
-    record.status = "pending"
+    record.status = "submitted"
     record.note = None
     db.commit()
     return {"code": 0, "msg": "已提交验收"}

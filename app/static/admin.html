@@ -411,7 +411,6 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-custom" id="finalizeGroupBtn">✅ 确认分组并创建任务</button>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
                 </div>
             </div>
@@ -2021,7 +2020,8 @@ function renderClassroomsTab() {
 
     html += `</div></div></div>`;
 
-    html += `<button class="btn btn-custom mt-2" onclick="saveAllClassroomAssignments()">💾 保存教室分配</button>`;
+    html += `<button class="btn btn-custom mt-2 me-2" onclick="saveAllClassroomAssignments()">💾 保存教室分配</button>`;
+    html += `<button class="btn btn-custom mt-2" id="finalizeGroupBtn" style="background:#198754" onclick="finalizeGrouping()">✅ 确认分组并创建任务</button>`;
     container.innerHTML = html;
 
     // Init SortableJS — exclude checkbox clicks from triggering drag
@@ -2193,10 +2193,9 @@ function getCsrf() {
     return document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
 }
 
-// Finalize button
-document.getElementById('finalizeGroupBtn')?.addEventListener('click', async () => {
+async function finalizeGrouping() {
     if (!currentGroupingRecruitId) return;
-    if (!await showConfirm('确认分组', '确定完成分组？这将创建布置清单和验收记录。')) return;
+    if (!await showConfirm('确认分组', '确定完成分组？这将创建布置清单和验收记录，之后不可再修改分组。')) return;
     const csrf = getCsrf();
     try {
         const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/finalize-grouping`, {
@@ -2207,7 +2206,7 @@ document.getElementById('finalizeGroupBtn')?.addEventListener('click', async () 
         showToast(data.msg, 'success');
         bootstrap.Modal.getInstance(document.getElementById('groupingModal')).hide();
     } catch (err) { showToast('操作失败', 'danger'); }
-});
+}
 
 // ========== 验收总览 ==========
 
@@ -2247,7 +2246,8 @@ function renderAcceptance(items) {
     });
 
     const statusMap = {
-        'pending': { label: '待验收', cls: 'bg-warning text-dark' },
+        'pending': { label: '未提交', cls: 'bg-light text-dark border' },
+        'submitted': { label: '已提交', cls: 'bg-info' },
         'rejected': { label: '已驳回', cls: 'bg-danger' },
         'passed': { label: '已通过', cls: 'bg-success' },
         'sealed': { label: '已封门', cls: 'bg-secondary' },
