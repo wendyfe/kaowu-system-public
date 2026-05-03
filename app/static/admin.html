@@ -1613,8 +1613,6 @@ function renderGeneralTab() {
     const container = document.getElementById('tabGeneralContent');
     const data = groupingData;
 
-    // Exclude current building supervisors from general supervisor candidates
-    const bsIds = new Set(data.supervisors.map(s => s.registration_id));
     const current = data.registrations.find(r => r.id === data.general_supervisor_id);
 
     let html = '';
@@ -1623,11 +1621,10 @@ function renderGeneralTab() {
     } else {
         html += `<div class="alert alert-warning py-2">⚠️ 尚未设置总负责人，建议指定一位有经验的人员担任</div>`;
     }
-    html += `<div class="mb-2"><strong>选择总负责人（可选）：</strong></div>`;
+    html += `<div class="mb-2"><strong>选择总负责人（可选，允许同时担任楼栋负责人）：</strong></div>`;
     html += `<select class="form-select" id="generalSupervisorSelect" style="max-width:400px" onchange="saveGeneralSupervisor(this.value)">`;
     html += `<option value="">（不指定）</option>`;
     data.registrations.forEach(r => {
-        if (bsIds.has(r.id)) return; // 已是楼栋负责人，不可兼任总负责人
         const sel = r.id === data.general_supervisor_id ? 'selected' : '';
         html += `<option value="${r.id}" ${sel}>${r.name}（${r.gender}${r.has_experience ? ' ⭐有经验' : ''}）</option>`;
     });
@@ -1663,7 +1660,8 @@ function renderSupervisorTab() {
         return;
     }
 
-    const candidates = data.registrations.filter(r => r.id !== data.general_supervisor_id);
+    // 总负责人也可兼任楼栋负责人，不排除
+    const candidates = data.registrations;
     const supervisorMap = {};
     data.supervisors.forEach(s => { supervisorMap[s.zone_name] = s.registration_id; });
 
