@@ -28,6 +28,7 @@
 | name | string | 如 B101、102 |
 | is_fixed_seats | bool | 是否固定桌椅（Fixed: 好布置，可多分） |
 | can_double_exam | bool | 是否具备双考场条件（物理空间够用） |
+| is_enabled | bool | 是否启用为可用考场（禁用后不在考场选择器中显示） |
 
 **栋（zone）— 从教室名称自动推导，不存表**
 
@@ -40,8 +41,8 @@
 
 | 新增字段 | 说明 |
 |---------|------|
-| general_supervisor_id | int，关联 registration.id，总负责人（可选）|
-| has_floor_supervisors | bool，是否需要楼栋负责人（大考/小考自适应） |
+| general_supervisor_id | int \| null，关联 registration.id，总负责人（可选，传 null 移除）|
+| has_floor_supervisors | bool，是否需要楼栋负责人（大考/小考自适应，发布时配置） |
 
 **recruitment_classrooms（招募-教室关联）**
 
@@ -71,6 +72,8 @@
 | id | int PK | |
 | group_id | int FK | |
 | registration_id | int FK | 关联报名记录 |
+
+> 约束：UNIQUE (group_id, registration_id)，防止同一成员重复入组。
 
 **recruitment_group_classrooms（组-教室分配）**
 
@@ -271,19 +274,35 @@
 ## 3. 现有代码改动
 
 ### main.py
-- 新增数据模型：Building, Classroom, RecruitmentClassroom, RecruitmentGroup, RecruitmentGroupMember, RecruitmentGroupClassroom, BuildingSupervisor, TaskChecklistItem, ClassroomTaskProgress, AcceptanceRecord
+- 新增数据模型：Building, Classroom, RecruitmentClassroom, RecruitmentGroup, RecruitmentGroupMember, RecruitmentGroupClassroom, BuildingSupervisor, TaskProgress (原 ClassroomTaskProgress), AcceptanceRecord
 - 新增 API：教室管理 CRUD、分组排班、清单进度、验收、恢复
-- 现有 Recruitment 表新增字段（general_supervisor_id）
+- 现有 Recruitment 表新增字段（general_supervisor_id, has_floor_supervisors）
 - 现有 Registration 表新增性别字段
+- 现有 Classroom 表新增 is_enabled 字段
 - **删除自动分组算法**：auto_assign_groups() 和 save_groups_to_db() 不再使用
 - **新增手动分组 API**：设置总负责人、设置楼栋负责人、创建/删除组、拖拽成员、分配教室
-- **新增 BuildingSupervisor 模型**
+- **新增 BuildingSupervisor 模型**：独立于分组表存储楼栋负责人，验收面板直接读此表
+- **RecruitmentGroupMember 唯一约束**：(group_id, registration_id) 防重复入组
+- **级联删除**：删除招募时按序清理所有关联表（验收记录→任务进度→分组→教室配置→楼栋负责人→报名记录→招募）
+- **`import json` 统一在文件顶部**，不再散落在各路由函数体内
+- **set_group_members API 去重**：插入前用 set 过滤重复 registration_id
+- **set_general_supervisor API**：registration_id 改为 `int | None`，支持传 null 移除
+- **finalize_grouping**：增加教室分配检查，每组必须至少分配一间教室
+- **update_classroom**：增加 `is_enabled` 参数
 
 ### admin.html
 - 新增"教室管理"页面
-- 发布招募表单新增"选择考场"区块
+- 发布招募表单新增"选择考场"区块 + "验收配置"区块（has_floor_supervisors 勾选）
 - **分组排班面板重写**：改为 4 标签页手动流程（总负责人→楼栋负责人→拖拽分组→分配教室）
 - 新增"验收总览"面板
+- 编辑教室弹窗增加"启用为可用考场"开关（is_enabled）
+- 编辑侧滑面板增加验收配置区块（has_floor_supervisors）
+- **saveAllGroupMembers**：改为 Promise.all 等待所有请求 + 跨组重复检测 + 失败提示
+- **saveAllClassroomAssignments**：对所有组（含零勾选）发送 PUT 清理旧分配
+- **removeGeneralSupervisor**：不传 registration_id 参数触发后端置 null
+- **renderSupervisorTab**：自动从考场推导楼栋分区，展示每个分区的教室列表 + 空值保护
+- **统一 CSRF 提取**：所有内联 cookie 解析替换为 getCsrf() 函数
+- **HTML 结构修正**：清除重复 closing div
 
 ### student.html
 - 报名表单新增性别字段
