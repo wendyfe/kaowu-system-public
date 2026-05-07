@@ -53,6 +53,8 @@ docker compose up -d --build
 | `KAOWU_ADMIN_USERNAME` | 管理员账号 | `admin` |
 | `KAOWU_ADMIN_PASSWORD` | 管理员密码 | `change_this_immediately` |
 | `KAOWU_SECRET_KEY` | 会话密钥 | `kaowu_2026_secret` |
+| `KAOWU_TOOLS_PIN` | 管理员工具页 PIN 码 | — |
+| `KAOWU_TOOLS_UNLOCK_MAX_AGE` | 工具页解锁有效期（秒） | `3600` |
 | `SMTP_USER` | 邮箱账号（发验证码） | — |
 | `SMTP_PASS` | 邮箱密码/授权码 | — |
 | `SMTP_HOST` | SMTP 服务器 | `smtp.gmail.com` |

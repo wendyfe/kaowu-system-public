@@ -6,3 +6,6 @@ itsdangerous==2.2.0
 pandas==2.3.0
 openpyxl==3.1.5
 jinja2==3.1.6
+reportlab==4.4.1
+dbfread==2.0.7
+xlrd==2.0.1

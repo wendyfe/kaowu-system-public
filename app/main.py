@@ -1,9 +1,9 @@
 from fastapi import FastAPI, Request, Form, HTTPException, Depends, BackgroundTasks, UploadFile, File
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, func, UniqueConstraint, text, event
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Float, func, UniqueConstraint, text, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import IntegrityError
@@ -25,6 +25,29 @@ import secrets
 import string
 import time
 import json
+import tempfile
+from pathlib import Path
+from openpyxl.styles import Alignment, Font
+try:
+    from tool_processors import (
+        assign_invigilators,
+        calculate_cet_pass_rates,
+        extract_grade_from_filename,
+        generate_seat_labels_pdf,
+        merge_excel_sheets,
+        PASS_SCORE,
+        EXCLUDE_MAJORS,
+    )
+except ImportError:
+    from app.tool_processors import (
+        assign_invigilators,
+        calculate_cet_pass_rates,
+        extract_grade_from_filename,
+        generate_seat_labels_pdf,
+        merge_excel_sheets,
+        PASS_SCORE,
+        EXCLUDE_MAJORS,
+    )
 
 
 # ==================== 北京时间配置 ====================
@@ -33,6 +56,27 @@ BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 def now_beijing():
     return datetime.now(BEIJING_TZ).replace(tzinfo=None)
 
+def load_env_file():
+    """Load a local .env for development without overriding real environment variables."""
+    candidates = [
+        Path(__file__).resolve().parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+    ]
+    for env_path in candidates:
+        if not env_path.exists():
+            continue
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+load_env_file()
+
 # ==================== 核心配置 ====================
 ADMIN_USERNAME = os.getenv("KAOWU_ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("KAOWU_ADMIN_PASSWORD", "change_this_immediately")
@@ -40,6 +84,8 @@ SECRET_KEY = os.getenv("KAOWU_SECRET_KEY", "kaowu_2026_secret")
 if SECRET_KEY == "kaowu_2026_secret":
     print("WARNING: Using default SECRET_KEY. Set KAOWU_SECRET_KEY env var for production.")
 serializer = URLSafeTimedSerializer(SECRET_KEY)
+TOOLS_PIN = os.getenv("KAOWU_TOOLS_PIN")
+TOOLS_UNLOCK_MAX_AGE = int(os.getenv("KAOWU_TOOLS_UNLOCK_MAX_AGE", 3600))
 
 # 新增邮箱配置
 SMTP_USER = os.getenv("SMTP_USER")
@@ -210,6 +256,66 @@ class AcceptanceRecord(Base):
     __table_args__ = (UniqueConstraint('recruitment_classroom_id', name='uq_acceptance_record_classroom'),)
 
 
+class CetExamBatch(Base):
+    """四六级考试批次"""
+    __tablename__ = "cet_exam_batches"
+    id = Column(Integer, primary_key=True)
+    exam_year = Column(Integer, nullable=False)
+    exam_term = Column(String(20), nullable=False)       # spring/fall/other
+    exam_level = Column(String(10), nullable=False)      # cet4/cet6
+    batch_variant = Column(String(20), nullable=False, default="normal")
+    batch_name = Column(String(100), nullable=False)
+    recognition_status = Column(String(20), nullable=False, default="auto")
+    source_filenames = Column(String(1000), nullable=True)
+    record_count = Column(Integer, nullable=False, default=0)
+    upload_time = Column(DateTime, default=now_beijing)
+    __table_args__ = (UniqueConstraint('exam_year', 'exam_term', 'exam_level', 'batch_variant', name='uq_cet_exam_batch'),)
+
+
+class CetScore(Base):
+    """四六级成绩记录"""
+    __tablename__ = "cet_scores"
+    id = Column(Integer, primary_key=True)
+    batch_id = Column(Integer, nullable=False)
+    ticket_no = Column(String(30), nullable=False)
+    id_card = Column(String(30), nullable=False)
+    student_no = Column(String(40), nullable=True)
+    name = Column(String(50), nullable=True)
+    college = Column(String(100), nullable=True)
+    school_name = Column(String(100), nullable=True)
+    listening_score = Column(Float, nullable=True)
+    reading_score = Column(Float, nullable=True)
+    writing_score = Column(Float, nullable=True)
+    total_score = Column(Float, nullable=True)
+    raw_level = Column(String(10), nullable=True)
+    upload_time = Column(DateTime, default=now_beijing)
+    __table_args__ = (UniqueConstraint('batch_id', 'id_card', name='uq_cet_score_batch_id_card'),)
+
+
+class GraduateBatch(Base):
+    """毕业生届别批次"""
+    __tablename__ = "graduate_batches"
+    id = Column(Integer, primary_key=True)
+    grade_name = Column(String(50), unique=True, nullable=False)
+    source_filename = Column(String(300), nullable=True)
+    record_count = Column(Integer, nullable=False, default=0)
+    upload_time = Column(DateTime, default=now_beijing)
+
+
+class GraduateRecord(Base):
+    """毕业生基础数据"""
+    __tablename__ = "graduate_records"
+    id = Column(Integer, primary_key=True)
+    batch_id = Column(Integer, nullable=False)
+    id_card = Column(String(30), nullable=False)
+    student_no = Column(String(40), nullable=True)
+    name = Column(String(50), nullable=True)
+    major = Column(String(100), nullable=True)
+    education_level = Column(String(50), nullable=True)
+    college = Column(String(100), nullable=True)
+    __table_args__ = (UniqueConstraint('batch_id', 'id_card', name='uq_graduate_record_batch_id_card'),)
+
+
 class BuildingSupervisor(Base):
     """楼栋负责人"""
     __tablename__ = "building_supervisors"
@@ -296,6 +402,20 @@ try:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_registration_student_phone ON registration (student_id, phone)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recruitment_classrooms_classroom ON recruitment_classrooms (classroom_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_task_progress_rc_type ON task_progress (recruitment_classroom_id, task_type)"))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_cet_exam_batch
+            ON cet_exam_batches (exam_year, exam_term, exam_level, batch_variant)
+        """))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_cet_score_batch_id_card
+            ON cet_scores (batch_id, id_card)
+        """))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_graduate_record_batch_id_card
+            ON graduate_records (batch_id, id_card)
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cet_scores_id_card ON cet_scores (id_card)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_graduate_records_id_card ON graduate_records (id_card)"))
         conn.commit()
 except Exception as e:
     print(f"WARNING: failed to create database indexes/constraints: {e}")
@@ -575,6 +695,21 @@ def check_csrf(request: Request):
     client_token = request.headers.get("X-CSRF-Token")
     if not csrf_token or csrf_token != client_token:
         raise HTTPException(status_code=403, detail="CSRF token 校验失败")
+
+def check_tools_unlocked(request: Request):
+    if not TOOLS_PIN:
+        raise HTTPException(status_code=403, detail="工具页 PIN 未配置，请先设置 KAOWU_TOOLS_PIN")
+    token = request.cookies.get("kaowu_tools")
+    if not token:
+        raise HTTPException(status_code=403, detail="请先输入工具页 PIN")
+    try:
+        data = serializer.loads(token, max_age=TOOLS_UNLOCK_MAX_AGE)
+        if data != f"tools:{ADMIN_USERNAME}":
+            raise HTTPException(status_code=403, detail="工具页解锁已失效，请重新输入 PIN")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=403, detail="工具页解锁已失效，请重新输入 PIN")
 
 # ==================== 页面路由 ====================
 @app.get("/", response_class=HTMLResponse)
@@ -1127,6 +1262,994 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
     }
 
     return StreamingResponse(output, headers=headers, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# ==================== 管理端工具 API ====================
+
+@app.get("/api/tools/status")
+async def tools_status(request: Request):
+    check_admin_login(request)
+    if not TOOLS_PIN:
+        return {"configured": False, "unlocked": False}
+    try:
+        check_tools_unlocked(request)
+        return {"configured": True, "unlocked": True}
+    except HTTPException:
+        return {"configured": True, "unlocked": False}
+
+
+@app.post("/api/tools/unlock")
+async def tools_unlock(request: Request, pin: str = Form(...)):
+    check_admin_login(request)
+    check_csrf(request)
+    rate_limit(f"tools_unlock_{get_client_ip(request)}", max_requests=5, window=300)
+    if not TOOLS_PIN:
+        raise HTTPException(403, "工具页 PIN 未配置，请先设置 KAOWU_TOOLS_PIN")
+    if not secrets.compare_digest(pin.strip(), TOOLS_PIN):
+        raise HTTPException(401, "PIN 码错误")
+
+    token = serializer.dumps(f"tools:{ADMIN_USERNAME}")
+    json_response = JSONResponse({"code": 0, "msg": "工具页已解锁"})
+    json_response.set_cookie(
+        key="kaowu_tools",
+        value=token,
+        httponly=True,
+        max_age=TOOLS_UNLOCK_MAX_AGE,
+        samesite="lax",
+    )
+    return json_response
+
+
+def _download_response(output: BytesIO, filename_utf8: str, filename_ascii: str, media_type: str):
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename_ascii}"; filename*=UTF-8\'\'{quote(filename_utf8)}',
+        "Content-Type": media_type,
+    }
+    output.seek(0)
+    return StreamingResponse(output, headers=headers, media_type=media_type)
+
+
+def _ensure_filename(filename: str | None, suffixes: tuple[str, ...], label: str):
+    if not filename or not filename.lower().endswith(suffixes):
+        raise HTTPException(400, f"{label} 文件格式不正确")
+
+
+TERM_LABELS = {"spring": "上半年", "fall": "下半年", "other": "其他"}
+LEVEL_LABELS = {"cet4": "四级", "cet6": "六级"}
+VARIANT_LABELS = {"normal": "正常", "delayed": "延考", "extra": "加考", "other": "其他"}
+
+
+def _term_from_code(code: str) -> str | None:
+    return {"1": "spring", "2": "fall"}.get(code)
+
+
+def _level_from_code(code: str) -> str | None:
+    return {"1": "cet4", "2": "cet6"}.get(code)
+
+
+def _batch_name(year: int, term: str, level: str, variant: str = "normal", custom_name: str | None = None) -> str:
+    if custom_name and custom_name.strip():
+        return custom_name.strip()
+    base = f"{year}年{TERM_LABELS.get(term, term)}{LEVEL_LABELS.get(level, level)}"
+    if variant and variant != "normal":
+        base += f"（{VARIANT_LABELS.get(variant, variant)}）"
+    return base
+
+
+def parse_cet_ticket(ticket_no: str | None) -> dict:
+    ticket = str(ticket_no or "").strip()
+    if not (len(ticket) >= 10 and ticket[:10].isdigit()):
+        return {"status": "failed", "reason": "准考证号为空或长度不足", "ticket_no": ticket}
+    year = 2000 + int(ticket[6:8])
+    term = _term_from_code(ticket[8])
+    level = _level_from_code(ticket[9])
+    if not term or not level:
+        return {"status": "failed", "reason": f"无法识别批次编码：{ticket[6:10]}", "ticket_no": ticket}
+    return {
+        "status": "auto",
+        "exam_year": year,
+        "exam_term": term,
+        "exam_level": level,
+        "batch_variant": "normal",
+        "batch_name": _batch_name(year, term, level),
+        "ticket_no": ticket,
+    }
+
+
+def _score_float(value):
+    try:
+        if value is None or str(value).strip() in ("", "--"):
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _read_dbf_upload_bytes(file_bytes: bytes) -> list[dict]:
+    try:
+        from dbfread import DBF
+    except ImportError as exc:
+        raise HTTPException(500, "缺少 dbfread 依赖，请先安装 requirements.txt") from exc
+
+    with tempfile.TemporaryDirectory(prefix="kaowu_dbf_") as tmpdir:
+        path = Path(tmpdir) / "score.dbf"
+        path.write_bytes(file_bytes)
+        table = DBF(str(path), encoding="gbk", load=False)
+        return [dict(record) for record in table]
+
+
+def _score_payload(record: dict) -> dict:
+    return {
+        "ticket_no": str(record.get("ks_zkz") or "").strip(),
+        "id_card": str(record.get("ks_sfz") or "").strip(),
+        "student_no": str(record.get("Ks_xh") or record.get("ks_xh") or "").strip(),
+        "name": str(record.get("ks_xm") or "").strip(),
+        "college": str(record.get("ks_xy_dm") or "").strip(),
+        "school_name": str(record.get("dm_mc") or "").strip(),
+        "listening_score": _score_float(record.get("tl")),
+        "reading_score": _score_float(record.get("yd")),
+        "writing_score": _score_float(record.get("xz")),
+        "total_score": _score_float(record.get("zf")),
+        "raw_level": str(record.get("ks_yyjb") or "").strip(),
+    }
+
+
+def analyze_score_records(records: list[dict], filename: str, db: Session, variant: str = "normal") -> list[dict]:
+    groups: dict[tuple, dict] = {}
+    unknown_count = 0
+    for record in records:
+        parsed = parse_cet_ticket(record.get("ks_zkz"))
+        if parsed["status"] == "auto":
+            key = (parsed["exam_year"], parsed["exam_term"], parsed["exam_level"], variant)
+            if key not in groups:
+                existing = db.query(CetExamBatch).filter(
+                    CetExamBatch.exam_year == parsed["exam_year"],
+                    CetExamBatch.exam_term == parsed["exam_term"],
+                    CetExamBatch.exam_level == parsed["exam_level"],
+                    CetExamBatch.batch_variant == variant,
+                ).first()
+                groups[key] = {
+                    "status": "auto",
+                    "filename": filename,
+                    "exam_year": parsed["exam_year"],
+                    "exam_term": parsed["exam_term"],
+                    "exam_level": parsed["exam_level"],
+                    "batch_variant": variant,
+                    "batch_name": _batch_name(parsed["exam_year"], parsed["exam_term"], parsed["exam_level"], variant),
+                    "count": 0,
+                    "existing": bool(existing),
+                    "existing_count": existing.record_count if existing else 0,
+                }
+            groups[key]["count"] += 1
+        else:
+            unknown_count += 1
+    result = list(groups.values())
+    if unknown_count:
+        result.append({
+            "status": "failed",
+            "filename": filename,
+            "batch_name": "无法自动识别",
+            "count": unknown_count,
+            "existing": False,
+            "message": "存在无法从 ks_zkz 识别批次的记录，可手动指定批次后导入",
+        })
+    return result
+
+
+def get_or_create_cet_batch(db: Session, year: int, term: str, level: str, variant: str, status: str, source_filename: str, batch_name: str | None = None):
+    batch = db.query(CetExamBatch).filter(
+        CetExamBatch.exam_year == year,
+        CetExamBatch.exam_term == term,
+        CetExamBatch.exam_level == level,
+        CetExamBatch.batch_variant == variant,
+    ).first()
+    if not batch:
+        batch = CetExamBatch(
+            exam_year=year,
+            exam_term=term,
+            exam_level=level,
+            batch_variant=variant,
+            batch_name=_batch_name(year, term, level, variant, batch_name),
+            recognition_status=status,
+            source_filenames=source_filename,
+            record_count=0,
+        )
+        db.add(batch)
+        db.flush()
+    else:
+        batch.batch_name = _batch_name(year, term, level, variant, batch_name) if batch_name else batch.batch_name
+        batch.recognition_status = status
+        names = set(filter(None, (batch.source_filenames or "").split(";")))
+        names.add(source_filename)
+        batch.source_filenames = ";".join(sorted(names))
+        batch.upload_time = now_beijing()
+    return batch
+
+
+def _upsert_score(db: Session, batch_id: int, payload: dict):
+    if not payload["id_card"]:
+        return False
+    score = db.query(CetScore).filter(
+        CetScore.batch_id == batch_id,
+        CetScore.id_card == payload["id_card"],
+    ).first()
+    if not score:
+        score = CetScore(batch_id=batch_id, id_card=payload["id_card"], ticket_no=payload["ticket_no"])
+        db.add(score)
+    score.ticket_no = payload["ticket_no"]
+    score.student_no = payload["student_no"]
+    score.name = payload["name"]
+    score.college = payload["college"]
+    score.school_name = payload["school_name"]
+    score.listening_score = payload["listening_score"]
+    score.reading_score = payload["reading_score"]
+    score.writing_score = payload["writing_score"]
+    score.total_score = payload["total_score"]
+    score.raw_level = payload["raw_level"]
+    score.upload_time = now_beijing()
+    return True
+
+
+def _grade_from_upload_name(filename: str) -> str:
+    grade_name, _ = extract_grade_from_filename(filename)
+    return grade_name
+
+
+def _graduate_payload(row) -> dict:
+    def get_any(*names):
+        for name in names:
+            if name in row and pd.notna(row[name]):
+                return str(row[name]).strip()
+        return ""
+    return {
+        "id_card": get_any("身份证号码", "身份证号", "证件号码", "身份证"),
+        "student_no": get_any("学号", "学生学号", "Ks_xh", "ks_xh"),
+        "name": get_any("姓名", "学生姓名", "ks_xm"),
+        "major": get_any("专业"),
+        "education_level": get_any("培养层次", "层次", "学历层次"),
+        "college": get_any("学院", "院系", "学院名称"),
+    }
+
+
+def _selected_exam_levels(value: str | None) -> list[str]:
+    raw = [item.strip() for item in (value or "cet4,cet6").split(",") if item.strip()]
+    levels = [item for item in raw if item in LEVEL_LABELS]
+    if not levels:
+        raise HTTPException(400, "请选择考试级别")
+    return levels
+
+
+def _graduate_query(db: Session, grade_name: str, education_level: str = "all"):
+    batch = db.query(GraduateBatch).filter(GraduateBatch.grade_name == grade_name).first()
+    if not batch:
+        raise HTTPException(404, "毕业生届别不存在")
+    query = db.query(GraduateRecord).filter(GraduateRecord.batch_id == batch.id)
+    if education_level and education_level != "all":
+        query = query.filter(GraduateRecord.education_level == education_level)
+    return batch, query
+
+
+def compute_cet_pass_rate_stats(
+    db: Session,
+    grade_name: str,
+    education_level: str,
+    exam_levels: list[str],
+    excluded_majors: list[str],
+):
+    batch, query = _graduate_query(db, grade_name, education_level)
+    graduates = query.all()
+    if not graduates:
+        raise HTTPException(400, "当前届别/层次下没有毕业生数据")
+
+    graduate_ids = {g.id_card for g in graduates if g.id_card}
+    excluded_set = set(excluded_majors or [])
+    valid_graduates = [g for g in graduates if (g.major or "") not in excluded_set]
+    valid_ids = {g.id_card for g in valid_graduates if g.id_card}
+
+    pass_ids_by_level = {}
+    for level in exam_levels:
+        rows = db.query(CetScore.id_card).join(
+            CetExamBatch,
+            CetScore.batch_id == CetExamBatch.id,
+        ).filter(
+            CetExamBatch.exam_level == level,
+            CetScore.total_score >= PASS_SCORE,
+            CetScore.id_card.in_(graduate_ids),
+        ).all()
+        pass_ids_by_level[level] = {row[0] for row in rows}
+
+    summary = []
+    for level in exam_levels:
+        pass_ids = pass_ids_by_level[level]
+        pass_count = len(graduate_ids & pass_ids)
+        valid_pass_count = len(valid_ids & pass_ids)
+        total = len(graduates)
+        valid_total = len(valid_graduates)
+        summary.append({
+            "grade_name": batch.grade_name,
+            "education_level": education_level if education_level != "all" else "全部",
+            "exam_level": level,
+            "exam_level_label": LEVEL_LABELS[level],
+            "total_count": total,
+            "pass_count": pass_count,
+            "pass_rate": round(pass_count / total * 100, 2) if total else 0,
+            "valid_total_count": valid_total,
+            "valid_pass_count": valid_pass_count,
+            "valid_pass_rate": round(valid_pass_count / valid_total * 100, 2) if valid_total else 0,
+        })
+
+    majors = sorted({g.major or "未填写专业" for g in graduates})
+    major_details = []
+    for major in majors:
+        major_graduates = [g for g in graduates if (g.major or "未填写专业") == major]
+        major_ids = {g.id_card for g in major_graduates if g.id_card}
+        row = {
+            "grade_name": batch.grade_name,
+            "education_level": education_level if education_level != "all" else "全部",
+            "major": major,
+            "is_excluded": major in excluded_set,
+            "total_count": len(major_graduates),
+        }
+        for level in exam_levels:
+            pass_count = len(major_ids & pass_ids_by_level[level])
+            row[f"{level}_pass_count"] = pass_count
+            row[f"{level}_pass_rate"] = round(pass_count / len(major_graduates) * 100, 2) if major_graduates else 0
+        major_details.append(row)
+
+    list_rows = {}
+    for level in exam_levels:
+        pass_ids = pass_ids_by_level[level]
+        passed = []
+        failed = []
+        for g in graduates:
+            target = passed if g.id_card in pass_ids else failed
+            target.append({
+                "届别": batch.grade_name,
+                "培养层次": g.education_level,
+                "专业": g.major,
+                "学号": g.student_no,
+                "姓名": g.name,
+                "身份证号": g.id_card,
+                "级别": LEVEL_LABELS[level],
+            })
+        list_rows[level] = {"passed": passed, "failed": failed}
+
+    return {
+        "summary": summary,
+        "major_details": major_details,
+        "lists": list_rows,
+        "conditions": {
+            "grade_name": batch.grade_name,
+            "education_level": education_level if education_level != "all" else "全部",
+            "exam_levels": [LEVEL_LABELS[level] for level in exam_levels],
+            "excluded_majors": excluded_majors,
+            "pass_score": PASS_SCORE,
+            "mode": "累计通过率（全部已入库成绩中任意一次达到分数线即通过）",
+        },
+    }
+
+
+def _stats_to_workbook(stats: dict) -> BytesIO:
+    output = BytesIO()
+    summary_rows = []
+    for row in stats["summary"]:
+        summary_rows.append({
+            "届别": row["grade_name"],
+            "培养层次": row["education_level"],
+            "级别": row["exam_level_label"],
+            "总人数": row["total_count"],
+            "通过人数": row["pass_count"],
+            "通过率(%)": row["pass_rate"],
+            "有效总人数": row["valid_total_count"],
+            "有效通过人数": row["valid_pass_count"],
+            "有效通过率(%)": row["valid_pass_rate"],
+        })
+
+    major_rows = []
+    for row in stats["major_details"]:
+        item = {
+            "届别": row["grade_name"],
+            "培养层次": row["education_level"],
+            "专业": row["major"],
+            "是否排除": "是" if row["is_excluded"] else "否",
+            "专业总人数": row["total_count"],
+        }
+        for summary in stats["summary"]:
+            level = summary["exam_level"]
+            label = summary["exam_level_label"]
+            item[f"{label}通过人数"] = row.get(f"{level}_pass_count", 0)
+            item[f"{label}通过率(%)"] = row.get(f"{level}_pass_rate", 0)
+        major_rows.append(item)
+
+    conditions = stats["conditions"]
+    condition_rows = [
+        {"项目": "届别", "值": conditions["grade_name"]},
+        {"项目": "培养层次", "值": conditions["education_level"]},
+        {"项目": "考试级别", "值": "、".join(conditions["exam_levels"])},
+        {"项目": "分数线", "值": conditions["pass_score"]},
+        {"项目": "统计口径", "值": conditions["mode"]},
+        {"项目": "排除专业", "值": "、".join(conditions["excluded_majors"]) if conditions["excluded_majors"] else "无"},
+    ]
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        pd.DataFrame(summary_rows).to_excel(writer, sheet_name="整体通过率汇总", index=False)
+        pd.DataFrame(major_rows).to_excel(writer, sheet_name="专业通过率明细", index=False)
+        for level, lists in stats["lists"].items():
+            label = LEVEL_LABELS[level]
+            pd.DataFrame(lists["passed"]).to_excel(writer, sheet_name=f"{label}已通过名单", index=False)
+            pd.DataFrame(lists["failed"]).to_excel(writer, sheet_name=f"{label}未通过名单", index=False)
+        pd.DataFrame(condition_rows).to_excel(writer, sheet_name="统计条件说明", index=False)
+        for ws in writer.book.worksheets:
+            for cell in ws[1]:
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="center")
+            for column in ws.columns:
+                max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column)
+                ws.column_dimensions[column[0].column_letter].width = min(max(max_length + 2, 12), 28)
+    output.seek(0)
+    return output
+
+
+@app.get("/api/tools/cet-data/overview")
+async def cet_data_overview(request: Request, db: Session = Depends(get_db)):
+    check_admin_login(request)
+    check_tools_unlocked(request)
+    score_batches = db.query(CetExamBatch).order_by(
+        CetExamBatch.exam_year.desc(),
+        CetExamBatch.exam_term.desc(),
+        CetExamBatch.exam_level,
+        CetExamBatch.batch_variant,
+    ).all()
+    graduate_batches = db.query(GraduateBatch).order_by(GraduateBatch.grade_name.desc()).all()
+    return {
+        "score_batches": [{
+            "id": b.id,
+            "batch_name": b.batch_name,
+            "exam_year": b.exam_year,
+            "exam_term": b.exam_term,
+            "exam_term_label": TERM_LABELS.get(b.exam_term, b.exam_term),
+            "exam_level": b.exam_level,
+            "exam_level_label": LEVEL_LABELS.get(b.exam_level, b.exam_level),
+            "batch_variant": b.batch_variant,
+            "batch_variant_label": VARIANT_LABELS.get(b.batch_variant, b.batch_variant),
+            "recognition_status": b.recognition_status,
+            "record_count": b.record_count,
+            "source_filenames": b.source_filenames,
+            "upload_time": b.upload_time.strftime("%Y-%m-%d %H:%M") if b.upload_time else None,
+        } for b in score_batches],
+        "graduate_batches": [{
+            "id": b.id,
+            "grade_name": b.grade_name,
+            "source_filename": b.source_filename,
+            "record_count": b.record_count,
+            "upload_time": b.upload_time.strftime("%Y-%m-%d %H:%M") if b.upload_time else None,
+        } for b in graduate_batches],
+    }
+
+
+@app.get("/api/tools/cet-pass-rate/options")
+async def cet_pass_rate_options(request: Request, db: Session = Depends(get_db)):
+    check_admin_login(request)
+    check_tools_unlocked(request)
+    batches = db.query(GraduateBatch).order_by(GraduateBatch.grade_name.desc()).all()
+    return {
+        "graduate_batches": [{
+            "id": b.id,
+            "grade_name": b.grade_name,
+            "record_count": b.record_count,
+        } for b in batches],
+        "default_excluded_majors": EXCLUDE_MAJORS,
+    }
+
+
+@app.get("/api/tools/cet-pass-rate/majors")
+async def cet_pass_rate_majors(
+    request: Request,
+    grade_name: str,
+    education_level: str = "all",
+    db: Session = Depends(get_db),
+):
+    check_admin_login(request)
+    check_tools_unlocked(request)
+    _, query = _graduate_query(db, grade_name, education_level)
+    majors = [
+        row[0]
+        for row in query.with_entities(GraduateRecord.major)
+        .filter(GraduateRecord.major != None)
+        .distinct()
+        .order_by(GraduateRecord.major)
+        .all()
+        if row[0]
+    ]
+    major_set = set(majors)
+    return {
+        "majors": majors,
+        "default_excluded_majors": [major for major in EXCLUDE_MAJORS if major in major_set],
+    }
+
+
+@app.post("/api/tools/cet-pass-rate/analyze")
+async def cet_pass_rate_analyze(
+    request: Request,
+    grade_name: str = Form(...),
+    education_level: str = Form("all"),
+    exam_levels: str = Form("cet4,cet6"),
+    excluded_majors: str = Form("[]"),
+    db: Session = Depends(get_db),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    try:
+        excluded = json.loads(excluded_majors)
+        if not isinstance(excluded, list):
+            excluded = []
+    except Exception:
+        excluded = []
+    stats = compute_cet_pass_rate_stats(
+        db,
+        grade_name.strip(),
+        education_level,
+        _selected_exam_levels(exam_levels),
+        [str(item) for item in excluded],
+    )
+    stats.pop("lists", None)
+    return stats
+
+
+@app.post("/api/tools/cet-pass-rate/export")
+async def cet_pass_rate_export(
+    request: Request,
+    grade_name: str = Form(...),
+    education_level: str = Form("all"),
+    exam_levels: str = Form("cet4,cet6"),
+    excluded_majors: str = Form("[]"),
+    db: Session = Depends(get_db),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    try:
+        excluded = json.loads(excluded_majors)
+        if not isinstance(excluded, list):
+            excluded = []
+    except Exception:
+        excluded = []
+    stats = compute_cet_pass_rate_stats(
+        db,
+        grade_name.strip(),
+        education_level,
+        _selected_exam_levels(exam_levels),
+        [str(item) for item in excluded],
+    )
+    output = _stats_to_workbook(stats)
+    return _download_response(
+        output,
+        f"{grade_name}_四六级累计通过率统计.xlsx",
+        "cet_pass_rate.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.post("/api/tools/cet-scores/precheck")
+async def cet_scores_precheck(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    batch_variant: str = Form("normal"),
+    db: Session = Depends(get_db),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    if batch_variant not in VARIANT_LABELS:
+        raise HTTPException(400, "批次类型无效")
+
+    results = []
+    for file in files:
+        _ensure_filename(file.filename, (".dbf",), "成绩 DBF")
+        try:
+            records = _read_dbf_upload_bytes(await file.read())
+            groups = analyze_score_records(records, file.filename or "score.dbf", db, batch_variant)
+            status = "auto"
+            if any(g["status"] == "failed" for g in groups):
+                status = "failed"
+            elif len(groups) > 1:
+                status = "multiple"
+            results.append({
+                "filename": file.filename,
+                "record_count": len(records),
+                "status": status,
+                "groups": groups,
+            })
+        except Exception as e:
+            results.append({
+                "filename": file.filename,
+                "record_count": 0,
+                "status": "error",
+                "groups": [],
+                "message": str(e),
+            })
+    return {"files": results}
+
+
+@app.post("/api/tools/cet-scores/import")
+async def cet_scores_import(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    import_mode: str = Form("overwrite"),
+    batch_variant: str = Form("normal"),
+    manual_year: int | None = Form(None),
+    manual_term: str | None = Form(None),
+    manual_level: str | None = Form(None),
+    manual_batch_name: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    if import_mode not in ("overwrite", "merge"):
+        raise HTTPException(400, "导入方式无效")
+    if batch_variant not in VARIANT_LABELS:
+        raise HTTPException(400, "批次类型无效")
+    if manual_term and manual_term not in TERM_LABELS:
+        raise HTTPException(400, "手动批次无效")
+    if manual_level and manual_level not in LEVEL_LABELS:
+        raise HTTPException(400, "手动级别无效")
+
+    imported = 0
+    skipped = 0
+    affected_batches = {}
+    overwritten_batch_ids = set()
+
+    for file in files:
+        _ensure_filename(file.filename, (".dbf",), "成绩 DBF")
+        records = _read_dbf_upload_bytes(await file.read())
+        for record in records:
+            parsed = parse_cet_ticket(record.get("ks_zkz"))
+            status = "auto"
+            if parsed["status"] == "auto":
+                year = parsed["exam_year"]
+                term = parsed["exam_term"]
+                level = parsed["exam_level"]
+            else:
+                if not (manual_year and manual_term and manual_level):
+                    skipped += 1
+                    continue
+                year = manual_year
+                term = manual_term
+                level = manual_level
+                status = "manual"
+
+            batch = get_or_create_cet_batch(
+                db,
+                year,
+                term,
+                level,
+                batch_variant,
+                status,
+                file.filename or "score.dbf",
+                manual_batch_name,
+            )
+            if import_mode == "overwrite" and batch.id not in overwritten_batch_ids:
+                db.query(CetScore).filter(CetScore.batch_id == batch.id).delete(synchronize_session=False)
+                overwritten_batch_ids.add(batch.id)
+            if _upsert_score(db, batch.id, _score_payload(record)):
+                imported += 1
+                affected_batches[batch.id] = batch
+            else:
+                skipped += 1
+
+    db.flush()
+    for batch_id, batch in affected_batches.items():
+        batch.record_count = db.query(func.count(CetScore.id)).filter(CetScore.batch_id == batch_id).scalar() or 0
+        batch.upload_time = now_beijing()
+    db.commit()
+
+    return {
+        "code": 0,
+        "msg": f"导入完成：成功 {imported} 条，跳过 {skipped} 条",
+        "imported": imported,
+        "skipped": skipped,
+        "batches": [{
+            "id": b.id,
+            "batch_name": b.batch_name,
+            "record_count": b.record_count,
+        } for b in affected_batches.values()],
+    }
+
+
+@app.post("/api/tools/graduates/precheck")
+async def graduates_precheck(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    results = []
+    for file in files:
+        _ensure_filename(file.filename, (".xlsx", ".xls"), "毕业生届别")
+        try:
+            content = await file.read()
+            df = pd.read_excel(BytesIO(content))
+            grade_name = _grade_from_upload_name(file.filename or "")
+            existing = db.query(GraduateBatch).filter(GraduateBatch.grade_name == grade_name).first()
+            results.append({
+                "filename": file.filename,
+                "grade_name": grade_name,
+                "record_count": len(df),
+                "existing": bool(existing),
+                "existing_count": existing.record_count if existing else 0,
+                "status": "auto",
+            })
+        except Exception as e:
+            results.append({
+                "filename": file.filename,
+                "grade_name": "",
+                "record_count": 0,
+                "existing": False,
+                "status": "error",
+                "message": str(e),
+            })
+    return {"files": results}
+
+
+@app.post("/api/tools/graduates/import")
+async def graduates_import(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    import_mode: str = Form("overwrite"),
+    db: Session = Depends(get_db),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    if import_mode not in ("overwrite", "merge"):
+        raise HTTPException(400, "导入方式无效")
+
+    imported = 0
+    skipped = 0
+    batches = []
+    for file in files:
+        _ensure_filename(file.filename, (".xlsx", ".xls"), "毕业生届别")
+        df = pd.read_excel(BytesIO(await file.read()))
+        grade_name = _grade_from_upload_name(file.filename or "")
+        if "身份证号码" not in df.columns and "身份证号" not in df.columns and "证件号码" not in df.columns:
+            raise HTTPException(400, f"{file.filename} 缺少身份证号码列")
+
+        batch = db.query(GraduateBatch).filter(GraduateBatch.grade_name == grade_name).first()
+        if not batch:
+            batch = GraduateBatch(grade_name=grade_name, source_filename=file.filename, record_count=0)
+            db.add(batch)
+            db.flush()
+        else:
+            batch.source_filename = file.filename
+            batch.upload_time = now_beijing()
+        if import_mode == "overwrite":
+            db.query(GraduateRecord).filter(GraduateRecord.batch_id == batch.id).delete(synchronize_session=False)
+
+        for _, row in df.iterrows():
+            payload = _graduate_payload(row)
+            if not payload["id_card"]:
+                skipped += 1
+                continue
+            record = db.query(GraduateRecord).filter(
+                GraduateRecord.batch_id == batch.id,
+                GraduateRecord.id_card == payload["id_card"],
+            ).first()
+            if not record:
+                record = GraduateRecord(batch_id=batch.id, id_card=payload["id_card"])
+                db.add(record)
+            record.student_no = payload["student_no"]
+            record.name = payload["name"]
+            record.major = payload["major"]
+            record.education_level = payload["education_level"]
+            record.college = payload["college"]
+            imported += 1
+
+        db.flush()
+        batch.record_count = db.query(func.count(GraduateRecord.id)).filter(GraduateRecord.batch_id == batch.id).scalar() or 0
+        batches.append(batch)
+    db.commit()
+
+    return {
+        "code": 0,
+        "msg": f"导入完成：成功 {imported} 条，跳过 {skipped} 条",
+        "imported": imported,
+        "skipped": skipped,
+        "batches": [{"id": b.id, "grade_name": b.grade_name, "record_count": b.record_count} for b in batches],
+    }
+
+
+@app.get("/api/tools/cet-student-query")
+async def cet_student_query(request: Request, id_card: str, db: Session = Depends(get_db)):
+    check_admin_login(request)
+    check_tools_unlocked(request)
+    cleaned_id = id_card.strip()
+    if not cleaned_id:
+        raise HTTPException(400, "请输入身份证号")
+
+    rows = db.query(CetScore, CetExamBatch).join(
+        CetExamBatch,
+        CetScore.batch_id == CetExamBatch.id,
+    ).filter(CetScore.id_card == cleaned_id).order_by(
+        CetExamBatch.exam_year,
+        CetExamBatch.exam_term,
+        CetExamBatch.exam_level,
+        CetExamBatch.batch_variant,
+    ).all()
+    return [{
+        "batch_name": batch.batch_name,
+        "exam_year": batch.exam_year,
+        "exam_term": batch.exam_term,
+        "exam_term_label": TERM_LABELS.get(batch.exam_term, batch.exam_term),
+        "exam_level": batch.exam_level,
+        "exam_level_label": LEVEL_LABELS.get(batch.exam_level, batch.exam_level),
+        "batch_variant": batch.batch_variant,
+        "batch_variant_label": VARIANT_LABELS.get(batch.batch_variant, batch.batch_variant),
+        "ticket_no": score.ticket_no,
+        "id_card": score.id_card,
+        "student_no": score.student_no,
+        "name": score.name,
+        "college": score.college,
+        "listening_score": score.listening_score,
+        "reading_score": score.reading_score,
+        "writing_score": score.writing_score,
+        "total_score": score.total_score,
+        "passed": (score.total_score or 0) >= PASS_SCORE,
+    } for score, batch in rows]
+
+
+@app.post("/api/tools/invigilator-assign")
+async def tool_invigilator_assign(
+    request: Request,
+    teachers_file: UploadFile = File(...),
+    rooms_file: UploadFile = File(...),
+    room_count: int = Form(...),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    rate_limit(f"tool_invigilator_{get_client_ip(request)}", max_requests=5, window=60)
+    _ensure_filename(teachers_file.filename, (".xlsx", ".xls"), "监考员表")
+    _ensure_filename(rooms_file.filename, (".xlsx", ".xls"), "考场表")
+    try:
+        output = assign_invigilators(
+            await teachers_file.read(),
+            await rooms_file.read(),
+            room_count,
+        )
+    except Exception as e:
+        raise HTTPException(400, f"监考员分配失败：{str(e)}")
+    return _download_response(
+        output,
+        "监考员分配结果.xlsx",
+        "invigilator_assignment.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.get("/api/tools/invigilator/templates/{template_type}")
+async def invigilator_template(request: Request, template_type: str):
+    check_admin_login(request)
+    check_tools_unlocked(request)
+    if template_type == "teachers":
+        df = pd.DataFrame({
+            "id": [1001, 1002, 1003, 1004],
+            "name": ["张三", "李四", "王五", "赵六"],
+            "gender": ["男", "女", "男", "女"],
+            "college": ["文学与历史学院", "教师教育学院", "数学学院", "经济与管理学院"],
+        })
+        filename_utf8 = "监考员表模板.xlsx"
+        filename_ascii = "invigilator_teachers_template.xlsx"
+        sheet_name = "监考员表"
+    elif template_type == "rooms":
+        df = pd.DataFrame({
+            "room_no": [1, 2, 3],
+            "room_name": ["B101-1", "B102-1", "综合楼101"],
+        })
+        filename_utf8 = "考场表模板.xlsx"
+        filename_ascii = "invigilator_rooms_template.xlsx"
+        sheet_name = "考场表"
+    else:
+        raise HTTPException(404, "模板不存在")
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.book[sheet_name]
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+        for column in ws.columns:
+            max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column)
+            ws.column_dimensions[column[0].column_letter].width = min(max(max_length + 2, 12), 24)
+    output.seek(0)
+    return _download_response(
+        output,
+        filename_utf8,
+        filename_ascii,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.post("/api/tools/seat-labels")
+async def tool_seat_labels(
+    request: Request,
+    num_rooms: int = Form(...),
+    num_seats: int = Form(30),
+    cols: int = Form(3),
+    rows: int = Form(10),
+    font_size: int = Form(40),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    rate_limit(f"tool_seat_labels_{get_client_ip(request)}", max_requests=10, window=60)
+    try:
+        output = generate_seat_labels_pdf(num_rooms, num_seats, cols, rows, font_size)
+    except Exception as e:
+        raise HTTPException(400, f"考场桌贴生成失败：{str(e)}")
+    return _download_response(output, "考场桌贴.pdf", "seat_labels.pdf", "application/pdf")
+
+
+@app.post("/api/tools/merge-workbook")
+async def tool_merge_workbook(request: Request, workbook_file: UploadFile = File(...)):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    rate_limit(f"tool_merge_workbook_{get_client_ip(request)}", max_requests=10, window=60)
+    _ensure_filename(workbook_file.filename, (".xlsx", ".xlsm"), "工作簿")
+    try:
+        output = merge_excel_sheets(await workbook_file.read())
+    except Exception as e:
+        raise HTTPException(400, f"工作簿合并失败：{str(e)}")
+    return _download_response(
+        output,
+        "工作簿多表合并结果.xlsx",
+        "merged_workbook.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.post("/api/tools/cet-pass-rate")
+async def tool_cet_pass_rate(
+    request: Request,
+    graduate_files: list[UploadFile] = File(...),
+    cet4_files: list[UploadFile] = File(...),
+    cet6_files: list[UploadFile] = File(...),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    rate_limit(f"tool_cet_pass_rate_{get_client_ip(request)}", max_requests=3, window=300)
+
+    for file in graduate_files:
+        _ensure_filename(file.filename, (".xlsx", ".xls"), "毕业生届别")
+    for file in cet4_files:
+        _ensure_filename(file.filename, (".dbf",), "四级成绩")
+    for file in cet6_files:
+        _ensure_filename(file.filename, (".dbf",), "六级成绩")
+
+    try:
+        graduate_payloads = [(file.filename or "毕业生届别.xlsx", await file.read()) for file in graduate_files]
+        with tempfile.TemporaryDirectory(prefix="kaowu_tools_") as tmpdir:
+            cet4_paths = []
+            cet6_paths = []
+            for index, file in enumerate(cet4_files, start=1):
+                path = Path(tmpdir) / f"cet4_{index}.dbf"
+                path.write_bytes(await file.read())
+                cet4_paths.append(str(path))
+            for index, file in enumerate(cet6_files, start=1):
+                path = Path(tmpdir) / f"cet6_{index}.dbf"
+                path.write_bytes(await file.read())
+                cet6_paths.append(str(path))
+            output = calculate_cet_pass_rates(graduate_payloads, cet4_paths, cet6_paths)
+    except Exception as e:
+        raise HTTPException(400, f"四六级通过率统计失败：{str(e)}")
+
+    return _download_response(output, "四六级通过率统计结果.zip", "cet_pass_rate_results.zip", "application/zip")
 
 
 # ==================== 考场基础数据 API ====================
