@@ -54,6 +54,34 @@
             scrollbar-width: thin;
             scrollbar-color: #ccc #f8f9fa;
         }
+        .classroom-building-toggle {
+            width: 100%;
+            border: 1px solid #dee2e6;
+            background: #fff;
+            color: #212529;
+            border-radius: 8px;
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            text-align: left;
+        }
+        .classroom-building-toggle:hover {
+            background: #f8f9fa;
+        }
+        .classroom-building-toggle .chevron {
+            transition: transform 0.15s ease;
+        }
+        .classroom-building-toggle[aria-expanded="true"] .chevron {
+            transform: rotate(90deg);
+        }
+        .classroom-building-body {
+            border: 1px solid #dee2e6;
+            border-top: 0;
+            border-radius: 0 0 8px 8px;
+            padding: 12px;
+            background: #fff;
+        }
     </style>
 </head>
 <body>
@@ -472,6 +500,16 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <script>
         // ========== 工具函数 ==========
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, ch => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[ch]));
+        }
 
         function showToast(message, type) {
             const toastEl = document.getElementById('toast');
@@ -1281,18 +1319,58 @@ async function loadPublishClassroomTree() {
             buildings[bn].zones[zone].push(c);
         });
 
+        let buildingIndex = 0;
         for (const [bname, building] of Object.entries(buildings)) {
             const bDiv = document.createElement('div');
-            bDiv.className = 'mb-3';
+            bDiv.className = 'mb-3 publish-building-section';
 
-            const bTitle = document.createElement('div');
-            bTitle.className = 'fw-bold mb-1';
+            const buildingClassrooms = Object.values(building.zones).flat();
+            const selectedInBuilding = buildingClassrooms.filter(c => publishSelections[c.id] !== undefined).length;
+            const collapseId = `publish-building-${buildingIndex}`;
+            const isOpen = selectedInBuilding > 0;
+
+            const bToggle = document.createElement('button');
+            bToggle.type = 'button';
+            bToggle.className = 'classroom-building-toggle';
+            bToggle.setAttribute('data-bs-toggle', 'collapse');
+            bToggle.setAttribute('data-bs-target', `#${collapseId}`);
+            bToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            bToggle.setAttribute('aria-controls', collapseId);
+
+            const bTitle = document.createElement('span');
+            bTitle.className = 'fw-bold';
             bTitle.textContent = bname;
-            bDiv.appendChild(bTitle);
+
+            const bMeta = document.createElement('span');
+            bMeta.className = 'd-flex align-items-center gap-2 text-muted small';
+
+            const countBadge = document.createElement('span');
+            countBadge.className = 'badge text-bg-light border publish-building-count';
+            countBadge.dataset.total = buildingClassrooms.length;
+            countBadge.textContent = selectedInBuilding > 0
+                ? `已选 ${selectedInBuilding}/${buildingClassrooms.length}`
+                : `${buildingClassrooms.length} 间`;
+
+            const chevron = document.createElement('span');
+            chevron.className = 'chevron';
+            chevron.textContent = '›';
+
+            bMeta.appendChild(countBadge);
+            bMeta.appendChild(chevron);
+            bToggle.appendChild(bTitle);
+            bToggle.appendChild(bMeta);
+            bDiv.appendChild(bToggle);
+
+            const bBodyWrap = document.createElement('div');
+            bBodyWrap.id = collapseId;
+            bBodyWrap.className = `collapse${isOpen ? ' show' : ''}`;
+
+            const bBody = document.createElement('div');
+            bBody.className = 'classroom-building-body';
 
             for (const [zone, classrooms] of Object.entries(building.zones)) {
                 const zDiv = document.createElement('div');
-                zDiv.className = 'ms-3 mb-2';
+                zDiv.className = 'mb-2';
 
                 // Zone checkbox row
                 const zCheckDiv = document.createElement('div');
@@ -1407,10 +1485,13 @@ async function loadPublishClassroomTree() {
                     updatePublishCount();
                 });
 
-                bDiv.appendChild(zDiv);
+                bBody.appendChild(zDiv);
             }
 
+            bBodyWrap.appendChild(bBody);
+            bDiv.appendChild(bBodyWrap);
             container.appendChild(bDiv);
+            buildingIndex++;
         }
 
         updatePublishCount();
@@ -1429,6 +1510,16 @@ function updatePublishCount() {
     document.getElementById('publishSelectionCount').textContent = `已选 ${ids.length} 间教室 → ${total} 个考场`;
     document.getElementById('publishClassroomIds').value = ids.join(',');
     document.getElementById('publishExamModes').value = modes.join(',');
+
+    document.querySelectorAll('.publish-building-section').forEach(section => {
+        const badge = section.querySelector('.publish-building-count');
+        if (!badge) return;
+        const totalInBuilding = parseInt(badge.dataset.total, 10) || 0;
+        const selectedInBuilding = section.querySelectorAll('.classroom-checkbox-publish:checked').length;
+        badge.textContent = selectedInBuilding > 0
+            ? `已选 ${selectedInBuilding}/${totalInBuilding}`
+            : `${totalInBuilding} 间`;
+    });
 }
 
 
@@ -1681,7 +1772,7 @@ function renderGeneralTab() {
 
     let html = '';
     if (current) {
-        html += `<div class="alert alert-success py-2">当前总负责人：<strong>${current.name}</strong>（${current.gender}${current.has_experience ? ' ⭐有经验' : ''}）</div>`;
+        html += `<div class="alert alert-success py-2">当前总负责人：<strong>${escapeHtml(current.name)}</strong>（${escapeHtml(current.gender)}${current.has_experience ? ' ⭐有经验' : ''}）</div>`;
     } else {
         html += `<div class="alert alert-warning py-2">⚠️ 尚未设置总负责人，建议指定一位有经验的人员担任</div>`;
     }
@@ -1690,7 +1781,7 @@ function renderGeneralTab() {
     html += `<option value="">（不指定）</option>`;
     data.registrations.forEach(r => {
         const sel = r.id === data.general_supervisor_id ? 'selected' : '';
-        html += `<option value="${r.id}" ${sel}>${r.name}（${r.gender}${r.has_experience ? ' ⭐有经验' : ''}）</option>`;
+        html += `<option value="${r.id}" ${sel}>${escapeHtml(r.name)}（${escapeHtml(r.gender)}${r.has_experience ? ' ⭐有经验' : ''}）</option>`;
     });
     html += `</select>`;
     container.innerHTML = html;
@@ -1736,25 +1827,25 @@ function renderSupervisorTab() {
     const supervisorMap = {};
     data.supervisors.forEach(s => { supervisorMap[s.zone_name] = s.registration_id; });
 
-    let html = `<div class="alert alert-info py-2">根据所选考场自动检测到 <strong>${zones.length}</strong> 个分区：${zones.join('、')}。同一人可以负责多栋。</div>`;
+    let html = `<div class="alert alert-info py-2">根据所选考场自动检测到 <strong>${zones.length}</strong> 个分区：${zones.map(escapeHtml).join('、')}。同一人可以负责多栋。</div>`;
     html += `<div class="row g-3">`;
 
     zones.forEach(zone => {
         const currentId = supervisorMap[zone] || '';
-        const roomNames = (classroomsByZone[zone] || []).map(c => c.name).join('、');
+        const roomNames = (classroomsByZone[zone] || []).map(c => escapeHtml(c.name)).join('、');
         html += `<div class="col-md-4"><div class="border rounded p-3">`;
-        html += `<div class="fw-bold mb-1">${zone}</div>`;
+        html += `<div class="fw-bold mb-1">${escapeHtml(zone)}</div>`;
         html += `<div class="small text-muted mb-2">教室：${roomNames}</div>`;
-        html += `<select class="form-select form-select-sm zone-supervisor-select" data-zone="${zone}">`;
+        html += `<select class="form-select form-select-sm zone-supervisor-select" data-zone="${escapeHtml(zone)}">`;
         html += `<option value="">（不指定）</option>`;
         candidates.forEach(r => {
             const selected = r.id === currentId ? 'selected' : '';
-            html += `<option value="${r.id}" ${selected}>${r.name}（${r.gender}${r.has_experience ? '⭐' : ''}）</option>`;
+            html += `<option value="${r.id}" ${selected}>${escapeHtml(r.name)}（${escapeHtml(r.gender)}${r.has_experience ? '⭐' : ''}）</option>`;
         });
         html += `</select>`;
         const currentPerson = candidates.find(r => r.id === currentId);
         if (currentPerson) {
-            html += `<div class="small text-muted mt-1">当前：${currentPerson.name}</div>`;
+            html += `<div class="small text-muted mt-1">当前：${escapeHtml(currentPerson.name)}</div>`;
         }
         html += `</div></div>`;
     });
@@ -1831,7 +1922,7 @@ function renderGroupsTab() {
             ? '<span class="badge bg-primary ms-1" style="font-size:0.65rem">M</span>'
             : '<span class="badge ms-1" style="font-size:0.65rem;background:#e91e63">F</span>';
         const expBadge = r.has_experience ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">⭐</span>' : '';
-        html += `<div class="border rounded p-2 mb-1 bg-light" data-reg-id="${r.id}" style="cursor:grab;font-size:0.85rem">${r.name}${genderBadge}${expBadge}</div>`;
+        html += `<div class="border rounded p-2 mb-1 bg-light" data-reg-id="${r.id}" style="cursor:grab;font-size:0.85rem">${escapeHtml(r.name)}${genderBadge}${expBadge}</div>`;
     });
     html += `</div></div>`;
 
@@ -1856,7 +1947,7 @@ function renderGroupsTab() {
                     ? '<span class="badge bg-primary ms-1" style="font-size:0.65rem">M</span>'
                     : '<span class="badge ms-1" style="font-size:0.65rem;background:#e91e63">F</span>';
                 const expBadge = r.has_experience ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">⭐</span>' : '';
-                html += `<div class="border rounded p-1 mb-1 bg-white small" data-reg-id="${r.id}" style="cursor:grab;font-size:0.85rem">${r.name}${genderBadge}${expBadge}</div>`;
+                html += `<div class="border rounded p-1 mb-1 bg-white small" data-reg-id="${r.id}" style="cursor:grab;font-size:0.85rem">${escapeHtml(r.name)}${genderBadge}${expBadge}</div>`;
             }
         });
         html += `</div>`;
@@ -2022,17 +2113,17 @@ function renderClassroomsTab() {
     html += `<div id="classroomPool" class="border rounded p-2" style="min-height:200px;max-height:60vh;overflow-y:auto">`;
     let hasUnassigned = false;
     for (const [zone, classrooms] of Object.entries(zoneClassrooms)) {
-        html += `<div class="small text-muted mt-2 mb-1 fw-bold">${zone}</div>`;
+        html += `<div class="small text-muted mt-2 mb-1 fw-bold">${escapeHtml(zone)}</div>`;
         classrooms.forEach(c => {
             if (assignedRcIds.has(c.rc_id)) {
                 html += `<div class="border rounded p-2 mb-1 text-center" style="opacity:0.35;background:#eee" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}">`;
-                html += `<div class="small fw-bold">${c.name}</div>`;
+                html += `<div class="small fw-bold">${escapeHtml(c.name)}</div>`;
                 html += `<div class="small text-muted">${c.exam_count}考场（已分配）</div></div>`;
             } else {
                 hasUnassigned = true;
                 html += `<div class="border rounded p-2 mb-1 bg-white classroom-card" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}">`;
                 html += `<input type="checkbox" class="form-check-input me-1 classroom-select-cb" data-rc-id="${c.rc_id}" style="cursor:pointer" onclick="event.stopPropagation()">`;
-                html += `<strong class="small">${c.name}</strong>`;
+                html += `<strong class="small">${escapeHtml(c.name)}</strong>`;
                 html += `<span class="small text-muted ms-1">${c.exam_count}考场</span></div>`;
             }
         });
@@ -2050,7 +2141,7 @@ function renderClassroomsTab() {
     data.groups.forEach((g, idx) => {
         const memberNames = g.member_ids.map(mid => {
             const r = data.registrations.find(reg => reg.id === mid);
-            return r ? r.name : '未知';
+            return r ? escapeHtml(r.name) : '未知';
         }).join('、');
 
         const gRooms = data.classrooms.filter(c => g.classroom_rc_ids.includes(c.rc_id));
@@ -2065,7 +2156,7 @@ function renderClassroomsTab() {
         html += `<div class="group-classroom-drop border rounded p-2" data-group-id="${g.id}" style="min-height:60px;border-style:dashed !important">`;
         gRooms.forEach(c => {
             html += `<div class="border rounded p-1 mb-1 bg-white small classroom-card" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}" style="cursor:grab;display:inline-block;margin:2px">`;
-            html += `${c.name} <span class="text-muted">${c.exam_count}考场</span>`;
+            html += `${escapeHtml(c.name)} <span class="text-muted">${c.exam_count}考场</span>`;
             html += `<button class="btn-close btn-close-sm ms-1" style="font-size:0.5rem" onclick="event.stopPropagation();unassignClassroom(${c.rc_id}, ${g.id})" title="移除"></button>`;
             html += `</div>`;
         });
@@ -2193,7 +2284,7 @@ async function unassignClassroom(rcId, groupId) {
             newCard.dataset.rcId = rcId;
             newCard.dataset.examCount = cData ? cData.exam_count : 1;
             newCard.style.cursor = 'grab';
-            newCard.innerHTML = `<input type="checkbox" class="form-check-input me-1 classroom-select-cb" data-rc-id="${rcId}" style="cursor:pointer" onclick="event.stopPropagation()"><strong class="small">${cData ? cData.name : '教室'}</strong><span class="small text-muted ms-1">${cData ? cData.exam_count : 1}考场</span>`;
+            newCard.innerHTML = `<input type="checkbox" class="form-check-input me-1 classroom-select-cb" data-rc-id="${rcId}" style="cursor:pointer" onclick="event.stopPropagation()"><strong class="small">${escapeHtml(cData ? cData.name : '教室')}</strong><span class="small text-muted ms-1">${cData ? cData.exam_count : 1}考场</span>`;
             pool.appendChild(newCard);
         }
     }
@@ -2318,15 +2409,15 @@ function renderAcceptance(items) {
     let html = '';
     let totalPassed = 0;
     for (const [zone, zoneItems] of Object.entries(zones)) {
-        html += `<div class="mb-3"><h5 class="border-bottom pb-1">🏢 ${zone}</h5>`;
+        html += `<div class="mb-3"><h5 class="border-bottom pb-1">🏢 ${escapeHtml(zone)}</h5>`;
         zoneItems.forEach(item => {
             const st = statusMap[item.status] || statusMap['pending'];
             if (item.status === 'passed') totalPassed++;
             html += `<div class="d-flex justify-content-between align-items-center border-bottom py-2">
                 <div>
-                    <strong>${item.classroom_name}</strong>
-                    <span class="small text-muted ms-2">👤 ${item.members.join('、')}</span>
-                    ${item.note ? `<div class="small text-danger">❌ ${item.note}</div>` : ''}
+                    <strong>${escapeHtml(item.classroom_name)}</strong>
+                    <span class="small text-muted ms-2">👤 ${item.members.map(escapeHtml).join('、')}</span>
+                    ${item.note ? `<div class="small text-danger">❌ ${escapeHtml(item.note)}</div>` : ''}
                 </div>
                 <span class="badge ${st.cls}">${st.label}</span>
             </div>`;
@@ -2396,11 +2487,11 @@ function renderRecovery(items) {
     let html = '';
     let totalDone = 0;
     for (const [zone, zoneItems] of Object.entries(zones)) {
-        html += `<div class="mb-3"><h5 class="border-bottom pb-1">🏢 ${zone}</h5>`;
+        html += `<div class="mb-3"><h5 class="border-bottom pb-1">🏢 ${escapeHtml(zone)}</h5>`;
         zoneItems.forEach(item => {
             if (item.all_done) totalDone++;
             html += `<div class="d-flex justify-content-between align-items-center border-bottom py-2">
-                <strong>${item.classroom_name}</strong>
+                <strong>${escapeHtml(item.classroom_name)}</strong>
                 <div class="d-flex align-items-center gap-2">
                     <div class="progress" style="width:100px;height:8px;">
                         <div class="progress-bar ${item.all_done ? 'bg-success' : 'bg-warning'}" style="width:${item.percent}%"></div>

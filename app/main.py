@@ -3,14 +3,15 @@ from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, func, UniqueConstraint, text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, func, UniqueConstraint, text, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 import os
 import pandas as pd
 from io import BytesIO
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 from uuid import uuid4
@@ -73,6 +74,14 @@ DB_DIR = os.getenv("DB_DIR", os.path.join(os.path.dirname(__file__), "db"))
 DB_PATH = os.path.join(DB_DIR, "kaowu.db")
 os.makedirs(DB_DIR, exist_ok=True)
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragmas(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -97,6 +106,7 @@ class RecruitmentClassroom(Base):
     classroom_id = Column(Integer, nullable=False)
     exam_mode = Column(String(10), nullable=False, default="single")  # 'single' 或 'double'
     exam_number_start = Column(Integer, nullable=False)  # 该教室考场起始号
+    __table_args__ = (UniqueConstraint('recruitment_id', 'classroom_id', name='uq_recruitment_classroom'),)
 
 
 class RecruitmentGroup(Base):
@@ -123,6 +133,7 @@ class RecruitmentGroupClassroom(Base):
     id = Column(Integer, primary_key=True)
     group_id = Column(Integer, nullable=False)
     recruitment_classroom_id = Column(Integer, nullable=False)
+    __table_args__ = (UniqueConstraint('recruitment_classroom_id', name='uq_group_classroom_assignment'),)
 
 
 class TaskProgress(Base):
@@ -152,6 +163,7 @@ class Registration(Base):
     # 新增字段：经验（建议用布尔，简单；或者用字符串 "有经验"/"无经验" 更直观）
     has_experience = Column(Boolean, nullable=False, default=False)  # True=有经验, False=无经验
     gender = Column(String(4), nullable=False, default="男")  # "男" 或 "女"
+    __table_args__ = (UniqueConstraint('recruitment_id', 'student_id', name='uq_registration_recruitment_student'),)
 
 # 新增验证码记录表（可选，替代内存存储）
 class VerifyCode(Base):
@@ -195,6 +207,7 @@ class AcceptanceRecord(Base):
     note = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=now_beijing)
     updated_at = Column(DateTime, default=now_beijing, onupdate=now_beijing)
+    __table_args__ = (UniqueConstraint('recruitment_classroom_id', name='uq_acceptance_record_classroom'),)
 
 
 class BuildingSupervisor(Base):
@@ -204,6 +217,7 @@ class BuildingSupervisor(Base):
     recruitment_id = Column(Integer, nullable=False)
     zone_name = Column(String(20), nullable=False)    # 如 "B栋"
     registration_id = Column(Integer, nullable=False)  # 关联 registration.id
+    __table_args__ = (UniqueConstraint('recruitment_id', 'zone_name', name='uq_building_supervisor_zone'),)
 
 
 Base.metadata.create_all(bind=engine)
@@ -256,6 +270,36 @@ try:
 except Exception:
     pass  # 字段已存在
 
+# 数据库约束/索引：为 SQLite 既有库补上关键唯一约束和查询索引
+try:
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_registration_recruitment_student
+            ON registration (recruitment_id, student_id)
+        """))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_recruitment_classroom
+            ON recruitment_classrooms (recruitment_id, classroom_id)
+        """))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_group_classroom_assignment
+            ON recruitment_group_classrooms (recruitment_classroom_id)
+        """))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_acceptance_record_classroom
+            ON acceptance_records (recruitment_classroom_id)
+        """))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_building_supervisor_zone
+            ON building_supervisors (recruitment_id, zone_name)
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_registration_student_phone ON registration (student_id, phone)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recruitment_classrooms_classroom ON recruitment_classrooms (classroom_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_task_progress_rc_type ON task_progress (recruitment_classroom_id, task_type)"))
+        conn.commit()
+except Exception as e:
+    print(f"WARNING: failed to create database indexes/constraints: {e}")
+
 def get_db():
     db = SessionLocal()
     try:
@@ -289,9 +333,14 @@ def get_client_ip(request: Request) -> str:
 
 # 简易内存级限流器
 _RATE_LIMITS: dict[str, list[float]] = {}
+_RATE_LIMIT_CLEANUP_AT = 0.0
 
 def rate_limit(key: str, max_requests: int = 10, window: int = 60):
+    global _RATE_LIMIT_CLEANUP_AT
     now = time.time()
+    if now - _RATE_LIMIT_CLEANUP_AT > 60:
+        _cleanup_rate_limits(now)
+        _RATE_LIMIT_CLEANUP_AT = now
     if key not in _RATE_LIMITS:
         _RATE_LIMITS[key] = []
     _RATE_LIMITS[key] = [t for t in _RATE_LIMITS[key] if now - t < window]
@@ -300,8 +349,8 @@ def rate_limit(key: str, max_requests: int = 10, window: int = 60):
     _RATE_LIMITS[key].append(now)
 
 # 定期清理过期限流记录
-def _cleanup_rate_limits():
-    now = time.time()
+def _cleanup_rate_limits(now: float | None = None):
+    now = now or time.time()
     for key in list(_RATE_LIMITS.keys()):
         _RATE_LIMITS[key] = [t for t in _RATE_LIMITS[key] if now - t < 120]
         if not _RATE_LIMITS[key]:
@@ -321,6 +370,18 @@ def detect_zone(classroom_name: str) -> str | None:
     if 'A' <= first_char.upper() <= 'Z':
         return f"{first_char.upper()}栋"
     return None
+
+
+def normalize_qq_group_url(value: str | None) -> str | None:
+    if not value or not value.strip():
+        return None
+    url = value.strip()
+    parsed = urlparse(url)
+    if parsed.scheme in ("http", "https") and parsed.netloc.lower().endswith("qm.qq.com"):
+        return url
+    if parsed.scheme == "tencent":
+        return url
+    raise HTTPException(400, "QQ加群链接仅支持 qm.qq.com 或 tencent:// 链接")
 
 
 def serialize_recruit_classrooms(recruit_id: int, db: Session) -> list[dict]:
@@ -588,7 +649,7 @@ async def add_recruit(
                     detail=f"结束时间格式错误（收到: {end_time_str}），应为 YYYY-MM-DD HH:MM 或 YYYY-MM-DDTHH:MM"
                 )
 
-    recruit = Recruitment(exam_name=exam_name.strip(), need_num=need_num, end_time=end_time, qq_group=qq_group.strip() if qq_group and qq_group.strip() else None, has_floor_supervisors=has_floor_supervisors)
+    recruit = Recruitment(exam_name=exam_name.strip(), need_num=need_num, end_time=end_time, qq_group=normalize_qq_group_url(qq_group), has_floor_supervisors=has_floor_supervisors)
     db.add(recruit)
     db.commit()
     db.refresh(recruit)
@@ -661,7 +722,7 @@ async def edit_recruit(
             recruit.end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M")
         except:
             raise HTTPException(400, "结束时间格式错误")
-    recruit.qq_group = qq_group.strip() if qq_group and qq_group.strip() else None
+    recruit.qq_group = normalize_qq_group_url(qq_group)
     recruit.has_floor_supervisors = has_floor_supervisors
 
     # 更新考场配置（如果有提供）
@@ -875,35 +936,29 @@ async def student_register(
         raise HTTPException(400, "报名已截止（时间到期，北京时间）")
 
     is_full = False
-    with db_lock(db):
-        # 锁内重新查询人数
-        current_count = db.query(func.count(Registration.id)).filter(Registration.recruitment_id == recruitment_id).scalar()
-        if current_count >= recruit.need_num:
-            recruit.is_active = False
-            is_full = True
-        else:
-            # 防重复报名（同一考试 + 同一学号）
-            exists = db.query(Registration).filter(
-                Registration.recruitment_id == recruitment_id,
-                Registration.student_id == student_id
-            ).first()
-            if exists:
-                raise HTTPException(400, "此学号已报名过该考试")
-
-            reg = Registration(
-                recruitment_id=recruitment_id,
-                student_id=student_id,
-                name=name,
-                phone=phone,
-                qq=qq,
-                has_experience=has_experience,
-                gender=gender,
-                ip_address=ip
-            )
-            db.add(reg)
-            # 添加后检查是否已满，满则关闭招募
-            if current_count + 1 >= recruit.need_num:
+    try:
+        with db_lock(db):
+            # SQLite 不支持行级锁，依赖事务内重查 + 唯一索引兜底重复报名
+            current_count = db.query(func.count(Registration.id)).filter(Registration.recruitment_id == recruitment_id).scalar()
+            if current_count >= recruit.need_num:
                 recruit.is_active = False
+                is_full = True
+            else:
+                reg = Registration(
+                    recruitment_id=recruitment_id,
+                    student_id=student_id,
+                    name=name,
+                    phone=phone,
+                    qq=qq,
+                    has_experience=has_experience,
+                    gender=gender,
+                    ip_address=ip
+                )
+                db.add(reg)
+                if current_count + 1 >= recruit.need_num:
+                    recruit.is_active = False
+    except IntegrityError:
+        raise HTTPException(400, "此学号已报名过该考试")
 
     if is_full:
         raise HTTPException(400, "报名人数已满")
@@ -1299,6 +1354,12 @@ async def delete_classroom(
     classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
     if not classroom:
         raise HTTPException(404, "教室不存在")
+
+    usage_count = db.query(func.count(RecruitmentClassroom.id)).filter(
+        RecruitmentClassroom.classroom_id == classroom_id
+    ).scalar()
+    if usage_count:
+        raise HTTPException(400, f"该教室已被 {usage_count} 个招募使用，不能删除；请改为禁用")
 
     db.delete(classroom)
     db.commit()
