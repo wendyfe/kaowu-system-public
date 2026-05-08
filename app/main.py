@@ -1439,6 +1439,46 @@ async def export_grouping_result_excel(request: Request, recruit_id: int, db: Se
         for cell in ws[1]:
             cell.font = Font(bold=True)
 
+        data_start_row = 2
+        data_end_row = len(rows) + 1
+
+        def merge_same_block(start_idx: int, key_fn, columns: list[int]):
+            block_start = start_idx
+            last_key = key_fn(rows[0])
+            for idx in range(1, len(rows) + 1):
+                current_key = key_fn(rows[idx]) if idx < len(rows) else None
+                if current_key != last_key:
+                    block_end = start_idx + idx - 1
+                    if block_end > block_start:
+                        for col in columns:
+                            ws.merge_cells(
+                                start_row=block_start,
+                                start_column=col,
+                                end_row=block_end,
+                                end_column=col,
+                            )
+                    block_start = start_idx + idx
+                    last_key = current_key
+
+        if rows:
+            merge_same_block(
+                data_start_row,
+                lambda row: row["分组"],
+                [3, 4, 5],
+            )
+            merge_same_block(
+                data_start_row,
+                lambda row: f'{row["楼栋/区域"]}|{row["楼栋负责人"]}',
+                [6, 7],
+            )
+            if data_end_row > data_start_row:
+                ws.merge_cells(
+                    start_row=data_start_row,
+                    start_column=8,
+                    end_row=data_end_row,
+                    end_column=8,
+                )
+
     output.seek(0)
 
     safe_name = "".join(c for c in recruit.exam_name if c.isalnum() or c in " _-")[:50]
