@@ -535,6 +535,107 @@ def check_registration_can_toggle_task(reg: Registration, task: TaskProgress, db
     return rc, assign
 
 
+def build_grouping_result_rows(recruit_id: int, db: Session) -> list[dict]:
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    registrations = {
+        r.id: r for r in db.query(Registration).filter(
+            Registration.recruitment_id == recruit_id
+        ).all()
+    }
+
+    def reg_name(reg_id):
+        reg = registrations.get(reg_id)
+        return reg.name if reg else ""
+
+    general_name = reg_name(recruit.general_supervisor_id) or "未指定"
+    supervisor_map = {
+        bs.zone_name: reg_name(bs.registration_id) or "未指定"
+        for bs in db.query(BuildingSupervisor).filter(
+            BuildingSupervisor.recruitment_id == recruit_id
+        ).all()
+    }
+
+    groups = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).order_by(RecruitmentGroup.id).all()
+
+    rows = []
+    assigned_rc_ids = set()
+    for idx, group in enumerate(groups, 1):
+        member_ids = [
+            m.registration_id for m in db.query(RecruitmentGroupMember).filter(
+                RecruitmentGroupMember.group_id == group.id
+            ).all()
+        ]
+        member_names = "、".join([reg_name(mid) for mid in member_ids if reg_name(mid)]) or "（空组）"
+
+        assignments = db.query(RecruitmentGroupClassroom).filter(
+            RecruitmentGroupClassroom.group_id == group.id
+        ).all()
+
+        group_rooms = []
+        for assign in assignments:
+            rc = db.query(RecruitmentClassroom).filter(
+                RecruitmentClassroom.id == assign.recruitment_classroom_id
+            ).first()
+            if not rc:
+                continue
+            cr, zone_name = get_rc_classroom_and_zone(rc, db)
+            if not cr:
+                continue
+            assigned_rc_ids.add(rc.id)
+            exam_count = 2 if rc.exam_mode == "double" else 1
+            group_rooms.append({
+                "classroom": cr.name,
+                "exam_type": "双考场" if exam_count == 2 else "单考场",
+                "exam_count": exam_count,
+                "zone_name": zone_name,
+                "supervisor": supervisor_map.get(zone_name, "未指定"),
+            })
+
+        group_rooms.sort(key=lambda r: r["classroom"])
+        room_count = len(group_rooms)
+        total_exam_count = sum(r["exam_count"] for r in group_rooms)
+        for room in group_rooms:
+            rows.append({
+                "教室": room["classroom"],
+                "考场类型": room["exam_type"],
+                "布置分组": member_names,
+                "负责教室数": room_count,
+                "负责考场数": total_exam_count,
+                "楼栋/区域": room["zone_name"],
+                "楼栋负责人": room["supervisor"],
+                "总负责人": general_name,
+                "分组": f"第{idx}组",
+            })
+
+    unassigned = db.query(RecruitmentClassroom).filter(
+        RecruitmentClassroom.recruitment_id == recruit_id,
+        ~RecruitmentClassroom.id.in_(assigned_rc_ids) if assigned_rc_ids else True
+    ).all()
+    for rc in sorted(unassigned, key=lambda item: item.exam_number_start):
+        cr, zone_name = get_rc_classroom_and_zone(rc, db)
+        if not cr:
+            continue
+        exam_count = 2 if rc.exam_mode == "double" else 1
+        rows.append({
+            "教室": cr.name,
+            "考场类型": "双考场" if exam_count == 2 else "单考场",
+            "布置分组": "未分配",
+            "负责教室数": 1,
+            "负责考场数": exam_count,
+            "楼栋/区域": zone_name,
+            "楼栋负责人": supervisor_map.get(zone_name, "未指定"),
+            "总负责人": general_name,
+            "分组": "未分配",
+        })
+
+    return rows
+
+
 def normalize_qq_group_url(value: str | None) -> str | None:
     if not value or not value.strip():
         return None
@@ -1304,6 +1405,49 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     }
 
+    return StreamingResponse(output, headers=headers, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.get("/api/recruit/{recruit_id}/grouping-result/export")
+async def export_grouping_result_excel(request: Request, recruit_id: int, db: Session = Depends(get_db)):
+    check_admin_login(request)
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    rows = build_grouping_result_rows(recruit_id, db)
+    if not rows:
+        raise HTTPException(400, "暂无分组结果数据")
+
+    columns = ["教室", "考场类型", "布置分组", "负责教室数", "负责考场数", "楼栋/区域", "楼栋负责人", "总负责人"]
+    df = pd.DataFrame([{col: row[col] for col in columns} for row in rows])
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="分组结果")
+        ws = writer.sheets["分组结果"]
+        ws.freeze_panes = "A2"
+        widths = {
+            "A": 14, "B": 12, "C": 24, "D": 12,
+            "E": 12, "F": 14, "G": 16, "H": 16,
+        }
+        for col, width in widths.items():
+            ws.column_dimensions[col].width = width
+        for row in ws.iter_rows():
+            for cell in row:
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+
+    output.seek(0)
+
+    safe_name = "".join(c for c in recruit.exam_name if c.isalnum() or c in " _-")[:50]
+    filename_utf8 = f"{safe_name}_分组结果_{recruit_id}.xlsx"
+    filename_ascii = f"grouping_result_{recruit_id}.xlsx"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename_ascii}"; filename*=UTF-8\'\'{quote(filename_utf8)}',
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }
     return StreamingResponse(output, headers=headers, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 

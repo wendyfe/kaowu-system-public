@@ -3473,7 +3473,10 @@ function renderResultTab() {
     html += `<div class="fw-bold">${isFinalized ? '最终分组结果' : '分组结果预览'}</div>`;
     html += `<div class="small text-muted">已分配 ${assignedRooms}/${totalRooms} 间教室，${assignedExams}/${totalExams} 个考场。考场数按本次招募选择的单/双考场配置计算。</div>`;
     html += `</div>`;
+    html += `<div class="d-flex align-items-center gap-2">`;
+    html += `<a class="btn btn-sm btn-outline-success" href="/api/recruit/${currentGroupingRecruitId}/grouping-result/export">导出Excel</a>`;
     html += `<span class="badge ${isFinalized ? 'bg-success' : 'bg-secondary'}">${isFinalized ? '已确认' : '未确认'}</span>`;
+    html += `</div>`;
     html += `</div>`;
 
     html += `<div class="table-responsive" style="max-height:62vh">`;
