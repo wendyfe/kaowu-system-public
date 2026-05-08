@@ -816,6 +816,7 @@
                         <li class="nav-item"><button class="nav-link" id="tab-supervisor-tab" data-bs-toggle="tab" data-bs-target="#tab-supervisor" type="button">②楼栋负责人</button></li>
                         <li class="nav-item"><button class="nav-link" id="tab-groups-tab" data-bs-toggle="tab" data-bs-target="#tab-groups" type="button">③拖拽分组</button></li>
                         <li class="nav-item"><button class="nav-link" id="tab-classrooms-tab" data-bs-toggle="tab" data-bs-target="#tab-classrooms" type="button">④分配教室</button></li>
+                        <li class="nav-item"><button class="nav-link" id="tab-result-tab" data-bs-toggle="tab" data-bs-target="#tab-result" type="button">⑤分组结果查询</button></li>
                     </ul>
                     <div class="tab-content">
                         <div class="tab-pane fade show active" id="tab-general">
@@ -829,6 +830,9 @@
                         </div>
                         <div class="tab-pane fade" id="tab-classrooms">
                             <div id="tabClassroomsContent"><div class="text-center py-4 text-muted">加载中...</div></div>
+                        </div>
+                        <div class="tab-pane fade" id="tab-result">
+                            <div id="tabResultContent"><div class="text-center py-4 text-muted">加载中...</div></div>
                         </div>
                     </div>
                 </div>
@@ -2709,7 +2713,7 @@ function updateEditCount() {
     document.getElementById('editExamModes').value = modes.join(',');
 }
 
-// ========== 手动分组排班（4 标签页） ==========
+// ========== 手动分组排班（5 标签页） ==========
 
 let currentGroupingRecruitId = null;
 let groupingData = null;
@@ -2723,6 +2727,8 @@ async function openGroupingPanel(recruitId, examName) {
     document.getElementById('tabSupervisorContent').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
     document.getElementById('tabGroupsContent').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
     document.getElementById('tabClassroomsContent').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
+    document.getElementById('tabResultContent').innerHTML = '<div class="text-center py-4 text-muted">加载中...</div>';
+    switchGroupingTab('tab-general-tab');
 
     const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('groupingModal'));
     modal.show();
@@ -2733,6 +2739,7 @@ async function openGroupingPanel(recruitId, examName) {
     document.getElementById('tab-supervisor-tab').addEventListener('shown.bs.tab', () => showFooterBtn(2));
     document.getElementById('tab-groups-tab').addEventListener('shown.bs.tab', () => showFooterBtn(3));
     document.getElementById('tab-classrooms-tab').addEventListener('shown.bs.tab', () => showFooterBtn(4));
+    document.getElementById('tab-result-tab').addEventListener('shown.bs.tab', () => showFooterBtn(5));
 }
 
 function showFooterBtn(n) {
@@ -2755,11 +2762,13 @@ async function loadGroupingData(recruitId) {
             document.getElementById('tabSupervisorContent').innerHTML = alert;
             document.getElementById('tabGroupsContent').innerHTML = alert;
             document.getElementById('tabClassroomsContent').innerHTML = alert;
+            renderResultTab();
             document.getElementById('btnSaveTab1').style.display = 'none';
             document.getElementById('btnSaveTab2').style.display = 'none';
             document.getElementById('btnSaveTab3').style.display = 'none';
             document.getElementById('btnSaveTab4a').style.display = 'none';
             document.getElementById('btnSaveTab4b').style.display = 'none';
+            switchGroupingTab('tab-result-tab');
             return;
         }
 
@@ -2767,17 +2776,20 @@ async function loadGroupingData(recruitId) {
         renderSupervisorTab();
         renderGroupsTab();
         renderClassroomsTab();
+        renderResultTab();
         // Restore footer button for currently active tab
         if (document.getElementById('tab-general').classList.contains('active')) showFooterBtn(1);
         else if (document.getElementById('tab-supervisor').classList.contains('active')) showFooterBtn(2);
         else if (document.getElementById('tab-groups').classList.contains('active')) showFooterBtn(3);
-        else showFooterBtn(4);
+        else if (document.getElementById('tab-classrooms').classList.contains('active')) showFooterBtn(4);
+        else showFooterBtn(5);
     } catch (err) {
         const errHtml = '<div class="text-danger text-center py-4">加载分组数据失败</div>';
         document.getElementById('tabGeneralContent').innerHTML = errHtml;
         document.getElementById('tabSupervisorContent').innerHTML = errHtml;
         document.getElementById('tabGroupsContent').innerHTML = errHtml;
         document.getElementById('tabClassroomsContent').innerHTML = errHtml;
+        document.getElementById('tabResultContent').innerHTML = errHtml;
         document.getElementById('btnSaveTab1').style.display = 'none';
         document.getElementById('btnSaveTab2').style.display = 'none';
         document.getElementById('btnSaveTab3').style.display = 'none';
@@ -3358,6 +3370,161 @@ async function saveAllClassroomAssignments() {
     }
 }
 
+function renderResultTab() {
+    const container = document.getElementById('tabResultContent');
+    const data = groupingData;
+    if (!data) {
+        container.innerHTML = '<div class="text-muted py-4">暂无分组数据</div>';
+        return;
+    }
+
+    const regMap = {};
+    data.registrations.forEach(r => { regMap[r.id] = r; });
+
+    const nameOf = function(regId) {
+        const reg = regMap[regId];
+        return reg ? reg.name : '';
+    };
+    const generalName = nameOf(data.general_supervisor_id) || '未指定';
+
+    const supervisorMap = {};
+    data.supervisors.forEach(s => {
+        supervisorMap[s.zone_name] = nameOf(s.registration_id) || '未指定';
+    });
+
+    const assignedRcIds = new Set();
+    const sections = [];
+
+    data.groups.forEach((g, idx) => {
+        const rooms = data.classrooms
+            .filter(c => g.classroom_rc_ids.includes(c.rc_id))
+            .sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hans-CN', { numeric: true }));
+        if (rooms.length === 0) return;
+
+        const memberNames = g.member_ids
+            .map(mid => nameOf(mid))
+            .filter(Boolean)
+            .join('、') || '（空组）';
+        const examCount = rooms.reduce((sum, c) => sum + (parseInt(c.exam_count) || 0), 0);
+
+        rooms.forEach(c => assignedRcIds.add(c.rc_id));
+        sections.push({
+            groupId: g.id,
+            groupLabel: `第${idx + 1}组`,
+            memberNames,
+            roomCount: rooms.length,
+            examCount,
+            rooms,
+        });
+    });
+
+    const unassignedRooms = data.classrooms
+        .filter(c => !assignedRcIds.has(c.rc_id))
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hans-CN', { numeric: true }));
+    if (unassignedRooms.length > 0) {
+        sections.push({
+            groupId: null,
+            groupLabel: '未分配',
+            memberNames: '未分配',
+            roomCount: unassignedRooms.length,
+            examCount: unassignedRooms.reduce((sum, c) => sum + (parseInt(c.exam_count) || 0), 0),
+            rooms: unassignedRooms,
+        });
+    }
+
+    const rows = [];
+    sections.forEach(section => {
+        section.rooms.forEach((room, roomIdx) => {
+            const supervisorName = supervisorMap[room.zone] || '未指定';
+            rows.push({
+                room,
+                section,
+                isGroupStart: roomIdx === 0,
+                groupSpan: section.rooms.length,
+                supervisorKey: `${room.zone || '未分区'}|${supervisorName}`,
+                supervisorLabel: supervisorName,
+            });
+        });
+    });
+
+    if (rows.length === 0) {
+        container.innerHTML = '<div class="text-muted py-4">暂无教室分配结果，请先完成步骤④</div>';
+        return;
+    }
+
+    for (let i = 0; i < rows.length; i++) {
+        if (i > 0 && rows[i].supervisorKey === rows[i - 1].supervisorKey) continue;
+        let span = 1;
+        while (i + span < rows.length && rows[i + span].supervisorKey === rows[i].supervisorKey) span++;
+        rows[i].isSupervisorStart = true;
+        rows[i].supervisorSpan = span;
+    }
+
+    const totalRooms = data.classrooms.length;
+    const assignedRooms = assignedRcIds.size;
+    const totalExams = data.classrooms.reduce((sum, c) => sum + (parseInt(c.exam_count) || 0), 0);
+    const assignedExams = rows
+        .filter(row => row.section.groupId !== null)
+        .reduce((sum, row) => sum + (parseInt(row.room.exam_count) || 0), 0);
+    const isFinalized = !!data.is_finalized;
+
+    let html = `<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">`;
+    html += `<div>`;
+    html += `<div class="fw-bold">${isFinalized ? '最终分组结果' : '分组结果预览'}</div>`;
+    html += `<div class="small text-muted">已分配 ${assignedRooms}/${totalRooms} 间教室，${assignedExams}/${totalExams} 个考场。考场数按本次招募选择的单/双考场配置计算。</div>`;
+    html += `</div>`;
+    html += `<span class="badge ${isFinalized ? 'bg-success' : 'bg-secondary'}">${isFinalized ? '已确认' : '未确认'}</span>`;
+    html += `</div>`;
+
+    html += `<div class="table-responsive" style="max-height:62vh">`;
+    html += `<table class="table table-bordered table-sm align-middle mb-0" style="background:#fff">`;
+    html += `<thead class="table-light" style="position:sticky;top:0;z-index:2">`;
+    html += `<tr>`;
+    html += `<th style="min-width:110px">教室</th>`;
+    html += `<th style="min-width:90px">考场类型</th>`;
+    html += `<th style="min-width:160px">布置分组</th>`;
+    html += `<th style="min-width:90px">负责教室数</th>`;
+    html += `<th style="min-width:90px">负责考场数</th>`;
+    html += `<th style="min-width:100px">楼栋/区域</th>`;
+    html += `<th style="min-width:120px">楼栋负责人</th>`;
+    html += `<th style="min-width:120px">总负责人</th>`;
+    html += `</tr>`;
+    html += `</thead><tbody>`;
+
+    rows.forEach((row, idx) => {
+        const examCount = parseInt(row.room.exam_count) || 0;
+        const examType = examCount >= 2 ? '双考场' : '单考场';
+        const groupClass = row.section.groupId === null ? 'table-warning' : '';
+        html += `<tr class="${groupClass}">`;
+        html += `<td class="fw-semibold">${escapeHtml(row.room.name)}</td>`;
+        html += `<td><span class="badge ${examCount >= 2 ? 'bg-primary' : 'bg-light text-dark border'}">${examType}</span></td>`;
+
+        if (row.isGroupStart) {
+            html += `<td rowspan="${row.groupSpan}"><div class="fw-bold">${escapeHtml(row.section.memberNames)}</div><div class="small text-muted">${escapeHtml(row.section.groupLabel)}</div></td>`;
+            html += `<td rowspan="${row.groupSpan}" class="text-center fw-semibold">${row.section.roomCount}</td>`;
+            html += `<td rowspan="${row.groupSpan}" class="text-center fw-semibold">${row.section.examCount}</td>`;
+        }
+
+        html += `<td>${escapeHtml(row.room.zone || '未分区')}</td>`;
+
+        if (row.isSupervisorStart) {
+            html += `<td rowspan="${row.supervisorSpan}">${escapeHtml(row.supervisorLabel)}</td>`;
+        }
+        if (idx === 0) {
+            html += `<td rowspan="${rows.length}">${escapeHtml(generalName)}</td>`;
+        }
+        html += `</tr>`;
+    });
+
+    html += `</tbody></table></div>`;
+
+    if (unassignedRooms.length > 0) {
+        html += `<div class="alert alert-warning py-2 mt-3 mb-0">仍有 <strong>${unassignedRooms.length}</strong> 间教室未分配到工作人员组，请回到步骤④处理。</div>`;
+    }
+
+    container.innerHTML = html;
+}
+
 // Utility
 function getCsrf() {
     return document.cookie.split('; ').find(row => row.startsWith('kaowu_csrf='))?.split('=')[1] || '';
@@ -3379,7 +3546,8 @@ async function finalizeGrouping() {
         const data = await res.json();
         if (!res.ok) { showToast(data.detail || '操作失败', 'danger'); return; }
         showToast(data.msg, 'success');
-        bootstrap.Modal.getInstance(document.getElementById('groupingModal')).hide();
+        await loadGroupingData(currentGroupingRecruitId);
+        switchGroupingTab('tab-result-tab');
     } catch (err) { showToast('操作失败', 'danger'); }
 }
 

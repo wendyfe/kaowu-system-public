@@ -652,7 +652,7 @@
                 }
 
                 card.style.display = 'block';
-                let html = data.zone_name ? `<div class="mb-2 text-muted small">🏢 ${escapeHtml(data.zone_name)}</div>` : '';
+                let html = '';
 
                 data.data.forEach(item => {
                     const examNos = item.exam_numbers.join('、');
@@ -661,6 +661,7 @@
                     <span class="fw-bold">🏫 ${escapeHtml(item.classroom_name)}（${escapeHtml(examNos)}考场）</span>
                     <span class="badge ${item.all_done ? 'bg-success' : 'bg-warning text-dark'}">${escapeHtml(item.progress)}</span>
                 </div>
+                <div class="px-3 pt-2 small text-muted">${escapeHtml(item.exam_name || '')}${item.zone_name ? ` · ${escapeHtml(item.zone_name)}` : ''}</div>
                 <div class="card-body py-2">`;
 
                     item.tasks.forEach(t => {
@@ -684,6 +685,7 @@
                         html += `<div class="mt-2">
                             <button class="btn btn-sm btn-outline-primary submit-review-btn"
                                 data-rc-id="${item.rc_id}"
+                                data-recruit-id="${item.recruit_id}"
                                 data-classroom="${escapeHtml(item.classroom_name)}">
                                 📋 提交验收
                             </button>
@@ -701,7 +703,11 @@
                         const taskId = this.dataset.taskId;
                         const label = this.nextElementSibling;
                         try {
-                            const res = await fetch(`/api/tasks/${taskId}/toggle`, { method: 'POST' });
+                            const res = await fetch(`/api/tasks/${taskId}/toggle`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ student_id: studentId, phone })
+                            });
                             const data = await res.json();
                             if (data.code === 0) {
                                 label.style.textDecoration = data.is_completed ? 'line-through' : 'none';
@@ -719,9 +725,9 @@
                 container.querySelectorAll('.submit-review-btn').forEach(btn => {
                     btn.addEventListener('click', async function() {
                         const rcId = this.dataset.rcId;
+                        const recruitId = this.dataset.recruitId;
                         const classroomName = this.dataset.classroom;
                         if (!window.confirm(`确定将「${classroomName}」提交验收吗？`)) return;
-                        const recruitId = window.currentRecruitId;
                         if (!recruitId) { showToast('无法获取招募信息', 'danger'); return; }
                         try {
                             const res = await fetch(`/api/recruit/${recruitId}/classrooms/${rcId}/submit-review`, {
@@ -734,6 +740,10 @@
                             });
                             const data = await res.json();
                             showToast(data.msg || data.detail, data.code === 0 ? 'success' : 'danger');
+                            if (data.code === 0) {
+                                loadMyTasks(studentId, phone);
+                                loadSupervisorPanel(studentId, phone);
+                            }
                         } catch (err) {
                             showToast('提交失败', 'danger');
                         }
@@ -773,14 +783,16 @@
                             let html = '<div class="row g-2">';
                             data.data.forEach(item => {
                                 const statusMap = {
-                                    'pending': '⏳ 待验收',
+                                    'pending': '⏳ 待提交',
+                                    'submitted': '📋 待验收',
                                     'rejected': '❌ 已驳回',
                                     'passed': '✅ 已通过',
                                     'sealed': '🔒 已封门',
                                 };
                                 const st = statusMap[item.status] || '⏳ 待验收';
                                 const sc = item.status === 'passed' || item.status === 'sealed' ? 'success' :
-                                           item.status === 'rejected' ? 'danger' : 'warning';
+                                           item.status === 'rejected' ? 'danger' :
+                                           item.status === 'submitted' ? 'info' : 'warning';
 
                                 html += `<div class="col-md-6 mb-2"><div class="border rounded p-3">
                                     <div class="d-flex justify-content-between align-items-center">
@@ -789,12 +801,14 @@
                                     </div>
                                     <div class="small text-muted">👤 ${item.group_members.map(m => escapeHtml(m.name)).join('、')}</div>`;
 
-                                if (item.status === 'pending') {
+                                if (item.status === 'submitted') {
                                     html += `<div class="mt-2">
                                         <button class="btn btn-sm btn-success me-1 review-pass" data-rc-id="${item.rc_id}">通过</button>
                                         <button class="btn btn-sm btn-danger review-reject" data-rc-id="${item.rc_id}">驳回</button>
                                         <input type="text" class="form-control form-control-sm mt-1 reject-note" placeholder="驳回原因" style="display:none;">
                                     </div>`;
+                                } else if (item.status === 'pending') {
+                                    html += `<div class="small text-muted mt-1">等待布置组提交验收</div>`;
                                 } else if (item.status === 'rejected') {
                                     html += `<div class="small text-danger mt-1">原因：${escapeHtml(item.note || '未填写')}</div>`;
                                 } else if (item.status === 'passed') {
@@ -876,6 +890,7 @@ async function loadRecoveryTasks(studentId, phone) {
                     <span class="fw-bold">🏫 ${escapeHtml(item.classroom_name)}</span>
                     <span class="badge ${item.all_done ? 'bg-success' : 'bg-warning text-dark'}">${escapeHtml(item.progress)}</span>
                 </div>
+                <div class="px-3 pt-2 small text-muted">${escapeHtml(item.exam_name || '')}${item.zone_name ? ` · ${escapeHtml(item.zone_name)}` : ''}</div>
                 <div class="card-body py-2">`;
 
             item.tasks.forEach(t => {
@@ -897,7 +912,11 @@ async function loadRecoveryTasks(studentId, phone) {
                 const taskId = this.dataset.taskId;
                 const label = this.nextElementSibling;
                 try {
-                    const res = await fetch(`/api/tasks/${taskId}/toggle`, { method: 'POST' });
+                    const res = await fetch(`/api/tasks/${taskId}/toggle`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ student_id: studentId, phone })
+                    });
                     const data = await res.json();
                     if (data.code === 0) {
                         label.style.textDecoration = data.is_completed ? 'line-through' : 'none';

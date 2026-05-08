@@ -492,6 +492,49 @@ def detect_zone(classroom_name: str) -> str | None:
     return None
 
 
+def get_rc_classroom_and_zone(rc: RecruitmentClassroom, db: Session):
+    cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+    zone = detect_zone(cr.name) if cr else None
+    return cr, zone or "未分区"
+
+
+def find_registration_for_recruit(recruit_id: int, student_id: str, phone: str, db: Session):
+    return db.query(Registration).filter(
+        Registration.student_id == student_id,
+        Registration.phone == phone,
+        Registration.recruitment_id == recruit_id
+    ).first()
+
+
+def get_group_assignment_for_rc(recruit_id: int, rc_id: int, db: Session):
+    return db.query(RecruitmentGroupClassroom).join(
+        RecruitmentGroup, RecruitmentGroupClassroom.group_id == RecruitmentGroup.id
+    ).filter(
+        RecruitmentGroupClassroom.recruitment_classroom_id == rc_id,
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).first()
+
+
+def check_registration_can_toggle_task(reg: Registration, task: TaskProgress, db: Session):
+    rc = db.query(RecruitmentClassroom).filter(
+        RecruitmentClassroom.id == task.recruitment_classroom_id
+    ).first()
+    if not rc:
+        raise HTTPException(404, "考场不存在")
+
+    assign = get_group_assignment_for_rc(reg.recruitment_id, rc.id, db)
+    if not assign:
+        raise HTTPException(403, "你没有此任务的权限")
+
+    member = db.query(RecruitmentGroupMember).filter(
+        RecruitmentGroupMember.group_id == assign.group_id,
+        RecruitmentGroupMember.registration_id == reg.id
+    ).first()
+    if not member:
+        raise HTTPException(403, "你没有此任务的权限")
+    return rc, assign
+
+
 def normalize_qq_group_url(value: str | None) -> str | None:
     if not value or not value.strip():
         return None
@@ -3037,6 +3080,7 @@ async def init_tasks(request: Request, recruit_id: int, db: Session = Depends(ge
 async def get_my_tasks(
     student_id: str = Form(...),
     phone: str = Form(...),
+    recruit_id: int = Form(None),
     db: Session = Depends(get_db)
 ):
     """学生查看自己的布置任务"""
@@ -3045,75 +3089,104 @@ async def get_my_tasks(
     if not (phone.isdigit() and len(phone) == 11):
         raise HTTPException(400, "手机号格式错误")
 
-    reg = db.query(Registration).filter(
+    reg_query = db.query(Registration).filter(
         Registration.student_id == student_id,
         Registration.phone == phone
-    ).first()
-    if not reg:
+    )
+    if recruit_id:
+        reg_query = reg_query.filter(Registration.recruitment_id == recruit_id)
+    regs = reg_query.order_by(Registration.create_time.desc()).all()
+    if not regs:
         raise HTTPException(404, "未找到报名记录")
 
-    member = db.query(RecruitmentGroupMember).join(
-        RecruitmentGroup,
-        RecruitmentGroupMember.group_id == RecruitmentGroup.id
-    ).filter(
-        RecruitmentGroupMember.registration_id == reg.id,
-        RecruitmentGroup.recruitment_id == reg.recruitment_id
-    ).first()
-
-    if not member:
-        return {"code": 0, "data": [], "msg": "暂无分组任务"}
-
-    assignments = db.query(RecruitmentGroupClassroom).filter(
-        RecruitmentGroupClassroom.group_id == member.group_id
-    ).all()
-
-    group = db.query(RecruitmentGroup).filter(RecruitmentGroup.id == member.group_id).first()
-
     result = []
-    for assign in assignments:
-        rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
-        if not rc:
+    for reg in regs:
+        recruit = db.query(Recruitment).filter(Recruitment.id == reg.recruitment_id).first()
+        member = db.query(RecruitmentGroupMember).join(
+            RecruitmentGroup,
+            RecruitmentGroupMember.group_id == RecruitmentGroup.id
+        ).filter(
+            RecruitmentGroupMember.registration_id == reg.id,
+            RecruitmentGroup.recruitment_id == reg.recruitment_id
+        ).first()
+
+        if not member:
             continue
-        cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
-        if not cr:
-            continue
 
-        tasks = db.query(TaskProgress).filter(
-            TaskProgress.recruitment_classroom_id == rc.id,
-            TaskProgress.task_type == "setup"
-        ).order_by(TaskProgress.id).all()
+        assignments = db.query(RecruitmentGroupClassroom).filter(
+            RecruitmentGroupClassroom.group_id == member.group_id
+        ).all()
 
-        task_list = [{
-            "id": t.id,
-            "item_key": t.item_key,
-            "item_name": t.item_name,
-            "is_completed": t.is_completed,
-            "is_auto_skip": t.is_auto_skip,
-        } for t in tasks]
+        for assign in assignments:
+            rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
+            if not rc:
+                continue
+            cr, zone_name = get_rc_classroom_and_zone(rc, db)
+            if not cr:
+                continue
 
-        completed = sum(1 for t in tasks if t.is_completed)
-        total = sum(1 for t in tasks if not t.is_auto_skip)
+            tasks = db.query(TaskProgress).filter(
+                TaskProgress.recruitment_classroom_id == rc.id,
+                TaskProgress.task_type == "setup"
+            ).order_by(TaskProgress.id).all()
 
-        result.append({
-            "rc_id": rc.id,
-            "classroom_name": cr.name,
-            "exam_numbers": [rc.exam_number_start, rc.exam_number_start + 1] if rc.exam_mode == "double" else [rc.exam_number_start],
-            "tasks": task_list,
-            "progress": f"{completed}/{total}",
-            "all_done": completed >= total,
-        })
+            task_list = [{
+                "id": t.id,
+                "item_key": t.item_key,
+                "item_name": t.item_name,
+                "is_completed": t.is_completed,
+                "is_auto_skip": t.is_auto_skip,
+            } for t in tasks]
 
-    return {"code": 0, "data": result, "zone_name": group.zone_name if group else ""}
+            completed = sum(1 for t in tasks if t.is_completed)
+            total = sum(1 for t in tasks if not t.is_auto_skip)
+
+            result.append({
+                "recruit_id": reg.recruitment_id,
+                "exam_name": recruit.exam_name if recruit else "",
+                "rc_id": rc.id,
+                "classroom_name": cr.name,
+                "zone_name": zone_name,
+                "exam_numbers": [rc.exam_number_start, rc.exam_number_start + 1] if rc.exam_mode == "double" else [rc.exam_number_start],
+                "tasks": task_list,
+                "progress": f"{completed}/{total}",
+                "all_done": completed >= total,
+            })
+
+    return {"code": 0, "data": result, "msg": "暂无分组任务" if not result else ""}
 
 
 @app.post("/api/tasks/{task_id}/toggle")
-async def toggle_task(task_id: int, db: Session = Depends(get_db)):
+async def toggle_task(request: Request, task_id: int, db: Session = Depends(get_db)):
     """切换任务项的完成状态"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    student_id = str(body.get("student_id", ""))
+    phone = str(body.get("phone", ""))
+
+    if not (student_id.isdigit() and len(student_id) == 8):
+        raise HTTPException(400, "学号格式错误")
+    if not (phone.isdigit() and len(phone) == 11):
+        raise HTTPException(400, "手机号格式错误")
+
     task = db.query(TaskProgress).filter(TaskProgress.id == task_id).first()
     if not task:
         raise HTTPException(404, "任务不存在")
     if task.is_auto_skip:
         raise HTTPException(400, "自动跳过的任务不可操作")
+
+    rc = db.query(RecruitmentClassroom).filter(
+        RecruitmentClassroom.id == task.recruitment_classroom_id
+    ).first()
+    if not rc:
+        raise HTTPException(404, "考场不存在")
+
+    reg = find_registration_for_recruit(rc.recruitment_id, student_id, phone, db)
+    if not reg:
+        raise HTTPException(404, "未找到报名记录")
+    check_registration_can_toggle_task(reg, task, db)
 
     task.is_completed = not task.is_completed
     task.completed_at = now_beijing() if task.is_completed else None
@@ -3145,7 +3218,7 @@ async def get_task_progress(request: Request, recruit_id: int, db: Session = Dep
             rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
             if not rc:
                 continue
-            cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+            cr, zone_name = get_rc_classroom_and_zone(rc, db)
             if not cr:
                 continue
 
@@ -3159,7 +3232,7 @@ async def get_task_progress(request: Request, recruit_id: int, db: Session = Dep
 
             result.append({
                 "classroom_name": cr.name,
-                "zone_name": g.zone_name or "无分区",
+                "zone_name": zone_name,
                 "progress": f"{completed}/{total}",
                 "percent": int(completed / total * 100) if total > 0 else 0,
                 "all_done": completed >= total,
@@ -3193,7 +3266,14 @@ async def submit_for_review(
     if not reg:
         raise HTTPException(404, "未找到报名记录")
 
-    rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == rc_id).first()
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    rc = db.query(RecruitmentClassroom).filter(
+        RecruitmentClassroom.id == rc_id,
+        RecruitmentClassroom.recruitment_id == recruit_id
+    ).first()
     if not rc:
         raise HTTPException(404, "考场不存在")
 
@@ -3234,10 +3314,11 @@ async def submit_for_review(
     if record.status == "sealed":
         raise HTTPException(400, "该考场已封门，不可操作")
 
-    record.status = "submitted"
+    record.status = "submitted" if recruit.has_floor_supervisors else "passed"
     record.note = None
     db.commit()
-    return {"code": 0, "msg": "已提交验收"}
+    msg = "已提交验收" if recruit.has_floor_supervisors else "已提交验收并自动通过"
+    return {"code": 0, "msg": msg}
 
 
 @app.get("/api/recruit/{recruit_id}/acceptance/supervisor")
@@ -3270,14 +3351,10 @@ async def supervisor_acceptance_panel(
         raise HTTPException(403, "你不是楼栋负责人")
 
     zone_name = bs.zone_name
-    zone_groups = db.query(RecruitmentGroup).filter(
-        RecruitmentGroup.recruitment_id == recruit_id,
-        RecruitmentGroup.zone_name == zone_name
-    ).all()
-
-    zone_group_ids = [g.id for g in zone_groups]
-    assigns = db.query(RecruitmentGroupClassroom).filter(
-        RecruitmentGroupClassroom.group_id.in_(zone_group_ids)
+    assigns = db.query(RecruitmentGroupClassroom).join(
+        RecruitmentGroup, RecruitmentGroupClassroom.group_id == RecruitmentGroup.id
+    ).filter(
+        RecruitmentGroup.recruitment_id == recruit_id
     ).all()
 
     result = []
@@ -3285,8 +3362,10 @@ async def supervisor_acceptance_panel(
         rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
         if not rc:
             continue
-        cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+        cr, rc_zone = get_rc_classroom_and_zone(rc, db)
         if not cr:
+            continue
+        if rc_zone != zone_name:
             continue
 
         record = db.query(AcceptanceRecord).filter(
@@ -3319,6 +3398,8 @@ async def review_classroom(
     body = await request.json()
     action = body.get("action", "")
     note = body.get("note", "")
+    student_id = str(body.get("student_id", ""))
+    phone = str(body.get("phone", ""))
 
     if action not in ("pass", "reject"):
         raise HTTPException(400, "操作无效")
@@ -3332,6 +3413,42 @@ async def review_classroom(
         raise HTTPException(404, "验收记录不存在")
     if record.status == "sealed":
         raise HTTPException(400, "已封门，不可操作")
+    if record.status != "submitted":
+        raise HTTPException(400, "该考场尚未提交验收")
+
+    rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == rc_id).first()
+    if not rc:
+        raise HTTPException(404, "考场不存在")
+    recruit = db.query(Recruitment).filter(Recruitment.id == rc.recruitment_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    is_admin = False
+    if not student_id and not phone:
+        check_admin_login(request)
+        check_csrf(request)
+        is_admin = True
+
+    if not is_admin:
+        if not (student_id.isdigit() and len(student_id) == 8):
+            raise HTTPException(400, "学号格式错误")
+        if not (phone.isdigit() and len(phone) == 11):
+            raise HTTPException(400, "手机号格式错误")
+        if not recruit.has_floor_supervisors:
+            raise HTTPException(403, "该招募不需要楼栋负责人验收")
+
+        reg = find_registration_for_recruit(recruit.id, student_id, phone, db)
+        if not reg:
+            raise HTTPException(404, "未找到报名记录")
+
+        _, rc_zone = get_rc_classroom_and_zone(rc, db)
+        bs = db.query(BuildingSupervisor).filter(
+            BuildingSupervisor.recruitment_id == recruit.id,
+            BuildingSupervisor.registration_id == reg.id,
+            BuildingSupervisor.zone_name == rc_zone
+        ).first()
+        if not bs:
+            raise HTTPException(403, "你不是该楼栋负责人")
 
     record.status = "rejected" if action == "reject" else "passed"
     record.note = note.strip() if note.strip() else None
@@ -3382,7 +3499,7 @@ async def acceptance_overview(request: Request, recruit_id: int, db: Session = D
             rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
             if not rc:
                 continue
-            cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+            cr, zone_name = get_rc_classroom_and_zone(rc, db)
             if not cr:
                 continue
 
@@ -3396,8 +3513,9 @@ async def acceptance_overview(request: Request, recruit_id: int, db: Session = D
             ).filter(RecruitmentGroupMember.group_id == g.id).all()
 
             result.append({
+                "rc_id": rc.id,
                 "classroom_name": cr.name,
-                "zone_name": g.zone_name or "无分区",
+                "zone_name": zone_name,
                 "members": [m.name for m in members],
                 "status": record.status if record else "pending",
                 "note": record.note if record else "",
@@ -3433,6 +3551,7 @@ async def init_recovery(request: Request, recruit_id: int, db: Session = Depends
 async def get_my_recovery_tasks(
     student_id: str = Form(...),
     phone: str = Form(...),
+    recruit_id: int = Form(None),
     db: Session = Depends(get_db)
 ):
     """学生查看自己的恢复任务"""
@@ -3441,62 +3560,70 @@ async def get_my_recovery_tasks(
     if not (phone.isdigit() and len(phone) == 11):
         raise HTTPException(400, "手机号格式错误")
 
-    reg = db.query(Registration).filter(
+    reg_query = db.query(Registration).filter(
         Registration.student_id == student_id,
         Registration.phone == phone
-    ).first()
-    if not reg:
+    )
+    if recruit_id:
+        reg_query = reg_query.filter(Registration.recruitment_id == recruit_id)
+    regs = reg_query.order_by(Registration.create_time.desc()).all()
+    if not regs:
         raise HTTPException(404, "未找到报名记录")
 
-    member = db.query(RecruitmentGroupMember).join(
-        RecruitmentGroup,
-        RecruitmentGroupMember.group_id == RecruitmentGroup.id
-    ).filter(
-        RecruitmentGroupMember.registration_id == reg.id,
-        RecruitmentGroup.recruitment_id == reg.recruitment_id
-    ).first()
-
-    if not member:
-        return {"code": 0, "data": []}
-
-    assignments = db.query(RecruitmentGroupClassroom).filter(
-        RecruitmentGroupClassroom.group_id == member.group_id
-    ).all()
-
     result = []
-    for assign in assignments:
-        rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
-        if not rc:
-            continue
-        cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
-        if not cr:
-            continue
+    for reg in regs:
+        recruit = db.query(Recruitment).filter(Recruitment.id == reg.recruitment_id).first()
+        member = db.query(RecruitmentGroupMember).join(
+            RecruitmentGroup,
+            RecruitmentGroupMember.group_id == RecruitmentGroup.id
+        ).filter(
+            RecruitmentGroupMember.registration_id == reg.id,
+            RecruitmentGroup.recruitment_id == reg.recruitment_id
+        ).first()
 
-        tasks = db.query(TaskProgress).filter(
-            TaskProgress.recruitment_classroom_id == rc.id,
-            TaskProgress.task_type == "recovery"
-        ).order_by(TaskProgress.id).all()
-
-        if not tasks:
+        if not member:
             continue
 
-        task_list = [{
-            "id": t.id,
-            "item_key": t.item_key,
-            "item_name": t.item_name,
-            "is_completed": t.is_completed,
-        } for t in tasks]
+        assignments = db.query(RecruitmentGroupClassroom).filter(
+            RecruitmentGroupClassroom.group_id == member.group_id
+        ).all()
 
-        completed = sum(1 for t in tasks if t.is_completed)
-        total = len(tasks)
+        for assign in assignments:
+            rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
+            if not rc:
+                continue
+            cr, zone_name = get_rc_classroom_and_zone(rc, db)
+            if not cr:
+                continue
 
-        result.append({
-            "rc_id": rc.id,
-            "classroom_name": cr.name,
-            "tasks": task_list,
-            "progress": f"{completed}/{total}",
-            "all_done": completed >= total,
-        })
+            tasks = db.query(TaskProgress).filter(
+                TaskProgress.recruitment_classroom_id == rc.id,
+                TaskProgress.task_type == "recovery"
+            ).order_by(TaskProgress.id).all()
+
+            if not tasks:
+                continue
+
+            task_list = [{
+                "id": t.id,
+                "item_key": t.item_key,
+                "item_name": t.item_name,
+                "is_completed": t.is_completed,
+            } for t in tasks]
+
+            completed = sum(1 for t in tasks if t.is_completed)
+            total = len(tasks)
+
+            result.append({
+                "recruit_id": reg.recruitment_id,
+                "exam_name": recruit.exam_name if recruit else "",
+                "rc_id": rc.id,
+                "classroom_name": cr.name,
+                "zone_name": zone_name,
+                "tasks": task_list,
+                "progress": f"{completed}/{total}",
+                "all_done": completed >= total,
+            })
 
     return {"code": 0, "data": result}
 
@@ -3520,7 +3647,7 @@ async def get_recovery_progress(request: Request, recruit_id: int, db: Session =
             rc = db.query(RecruitmentClassroom).filter(RecruitmentClassroom.id == assign.recruitment_classroom_id).first()
             if not rc:
                 continue
-            cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
+            cr, zone_name = get_rc_classroom_and_zone(rc, db)
             if not cr:
                 continue
 
@@ -3534,7 +3661,7 @@ async def get_recovery_progress(request: Request, recruit_id: int, db: Session =
 
             result.append({
                 "classroom_name": cr.name,
-                "zone_name": g.zone_name or "无分区",
+                "zone_name": zone_name,
                 "progress": f"{completed}/{total}",
                 "percent": int(completed / total * 100) if total > 0 else 0,
                 "all_done": completed >= total,
