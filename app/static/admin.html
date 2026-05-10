@@ -208,6 +208,7 @@
                                     <th>经验</th>
                                     <th>报名时间</th>
                                     <th>IP地址</th>
+                                    <th>操作</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
@@ -1282,11 +1283,51 @@
                     tdIp.className = 'text-muted';
                     tr.appendChild(tdIp);
 
+                    const tdAction = document.createElement("td");
+                    tdAction.style.whiteSpace = 'nowrap';
+                    const delBtn = document.createElement("button");
+                    delBtn.type = "button";
+                    delBtn.className = "btn btn-sm btn-outline-danger";
+                    delBtn.textContent = "删除";
+                    delBtn.onclick = function () {
+                        deleteRegistration(recruitId, r.id, r.name, r.student_id, examName);
+                    };
+                    tdAction.appendChild(delBtn);
+                    tr.appendChild(tdAction);
+
                     tbody.appendChild(tr);
                 });
             } catch (err) {
                 console.error("加载报名名单失败:", err);
                 showToast("加载失败，请重试", 'danger');
+            }
+        }
+
+        async function deleteRegistration(recruitId, regId, name, studentId, examName) {
+            const confirmed = await showConfirm(
+                "确认删除报名",
+                `确定删除 ${name}（${studentId}）的报名记录吗？如果该招募已进入分组、负责人或任务等后续流程，系统将拒绝删除。`
+            );
+            if (!confirmed) return;
+
+            try {
+                const res = await fetch(`/api/recruit/${recruitId}/registrations/${regId}`, {
+                    method: "DELETE",
+                    headers: { "X-CSRF-Token": getCsrf() }
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showToast(data.detail || "删除失败", 'danger');
+                    return;
+                }
+                showToast(data.msg, 'success');
+                if (data.hint) {
+                    setTimeout(() => showToast(data.hint, 'warning'), 800);
+                }
+                await viewRegistrations(recruitId, examName);
+                loadRecruitList();
+            } catch (err) {
+                showToast("删除失败，请重试", 'danger');
             }
         }
 

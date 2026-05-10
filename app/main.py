@@ -535,6 +535,42 @@ def check_registration_can_toggle_task(reg: Registration, task: TaskProgress, db
     return rc, assign
 
 
+def get_registration_delete_blockers(recruit: Recruitment, db: Session) -> list[str]:
+    blockers = []
+
+    if recruit.general_supervisor_id:
+        blockers.append("已设置总负责人")
+
+    if db.query(BuildingSupervisor.id).filter(
+        BuildingSupervisor.recruitment_id == recruit.id
+    ).first():
+        blockers.append("已设置楼栋负责人")
+
+    group_exists = db.query(RecruitmentGroup.id).filter(
+        RecruitmentGroup.recruitment_id == recruit.id
+    ).first()
+    if group_exists:
+        blockers.append("已创建分组")
+
+    rc_ids = [
+        rc_id for (rc_id,) in db.query(RecruitmentClassroom.id).filter(
+            RecruitmentClassroom.recruitment_id == recruit.id
+        ).all()
+    ]
+    if rc_ids:
+        if db.query(TaskProgress.id).filter(
+            TaskProgress.recruitment_classroom_id.in_(rc_ids)
+        ).first():
+            blockers.append("已有任务进度")
+
+        if db.query(AcceptanceRecord.id).filter(
+            AcceptanceRecord.recruitment_classroom_id.in_(rc_ids)
+        ).first():
+            blockers.append("已有验收记录")
+
+    return blockers
+
+
 def build_grouping_result_rows(recruit_id: int, db: Session) -> list[dict]:
     recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
     if not recruit:
@@ -1169,6 +1205,49 @@ async def view_registrations(request: Request, recruit_id: int, db: Session = De
         "ip_address": r.ip_address,
         "create_time": r.create_time.strftime("%Y-%m-%d %H:%M") if r.create_time else None
     } for r in regs]
+
+
+@app.delete("/api/recruit/{recruit_id}/registrations/{reg_id}")
+async def delete_registration_by_admin(
+    request: Request,
+    recruit_id: int,
+    reg_id: int,
+    db: Session = Depends(get_db)
+):
+    check_admin_login(request)
+    check_csrf(request)
+
+    recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+    if not recruit:
+        raise HTTPException(404, "招募不存在")
+
+    reg = db.query(Registration).filter(
+        Registration.id == reg_id,
+        Registration.recruitment_id == recruit_id
+    ).first()
+    if not reg:
+        raise HTTPException(404, "报名记录不存在")
+
+    blockers = get_registration_delete_blockers(recruit, db)
+    if blockers:
+        raise HTTPException(
+            400,
+            f"该招募已进入后续流程（{'、'.join(blockers)}），不能删除报名记录。请先在后续流程中调整相关安排。"
+        )
+
+    db.query(VerifyCode).filter(VerifyCode.reg_id == reg.id).delete(synchronize_session=False)
+    db.delete(reg)
+    db.commit()
+
+    current_count = db.query(func.count(Registration.id)).filter(
+        Registration.recruitment_id == recruit.id
+    ).scalar()
+    can_reopen = not recruit.end_time or now_beijing() < recruit.end_time
+    hint = None
+    if not recruit.is_active and can_reopen and current_count < recruit.need_num:
+        hint = "当前报名人数未满，但招募仍处于关闭状态。如需继续招募，请在列表中手动开启。"
+
+    return {"code": 0, "msg": "报名记录已删除", "hint": hint}
 
 # 学生报名（新增QQ字段校验）
 @app.post("/api/reg")
