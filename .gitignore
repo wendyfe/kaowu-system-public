@@ -28,3 +28,6 @@ app/db/
 
 # Worktrees
 .worktrees/
+
+# Private operations docs
+docs/manual-vps-backup-restore-runbook.md
