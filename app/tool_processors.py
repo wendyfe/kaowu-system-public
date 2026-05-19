@@ -544,12 +544,12 @@ def generate_seat_labels_pdf_v2(
         draw_fit_left(f"{id_column}：{record['identifier']}", text_x, id_y, info_width, "STSong-Light", 9, 5.5)
 
     if layout_mode == "stack_cut":
-        for seat_no in range(1, num_seats + 1):
-            pages_needed = math.ceil(num_rooms / labels_per_page)
-            for page in range(pages_needed):
-                start_room = page * labels_per_page + 1
-                rooms_this_page = min(num_rooms - page * labels_per_page, labels_per_page)
-                for idx in range(rooms_this_page):
+        room_batches = math.ceil(num_rooms / labels_per_page)
+        for batch in range(room_batches):
+            start_room = batch * labels_per_page + 1
+            rooms_this_batch = min(num_rooms - batch * labels_per_page, labels_per_page)
+            for seat_no in range(1, num_seats + 1):
+                for idx in range(rooms_this_batch):
                     draw_label(idx, start_room + idx, seat_no)
                 pdf.showPage()
     else:
