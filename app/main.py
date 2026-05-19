@@ -33,20 +33,28 @@ try:
         assign_invigilators,
         calculate_cet_pass_rates,
         extract_grade_from_filename,
+        generate_seat_label_precheck_report,
         generate_seat_labels_pdf,
+        generate_seat_labels_pdf_v2,
+        get_seat_label_columns,
         merge_excel_sheets,
         PASS_SCORE,
         EXCLUDE_MAJORS,
+        validate_seat_label_roster,
     )
 except ImportError:
     from app.tool_processors import (
         assign_invigilators,
         calculate_cet_pass_rates,
         extract_grade_from_filename,
+        generate_seat_label_precheck_report,
         generate_seat_labels_pdf,
+        generate_seat_labels_pdf_v2,
+        get_seat_label_columns,
         merge_excel_sheets,
         PASS_SCORE,
         EXCLUDE_MAJORS,
+        validate_seat_label_roster,
     )
 
 
@@ -2483,7 +2491,11 @@ async def invigilator_template(request: Request, template_type: str):
 @app.post("/api/tools/seat-labels")
 async def tool_seat_labels(
     request: Request,
-    num_rooms: int = Form(...),
+    content_mode: str = Form("numbers"),
+    layout_mode: str = Form("stack_cut"),
+    id_column: str = Form(""),
+    roster_file: UploadFile | None = File(None),
+    num_rooms: int | None = Form(None),
     num_seats: int = Form(30),
     cols: int = Form(3),
     rows: int = Form(10),
@@ -2494,10 +2506,120 @@ async def tool_seat_labels(
     check_tools_unlocked(request)
     rate_limit(f"tool_seat_labels_{get_client_ip(request)}", max_requests=10, window=60)
     try:
-        output = generate_seat_labels_pdf(num_rooms, num_seats, cols, rows, font_size)
+        roster_precheck = None
+        if content_mode == "roster":
+            _ensure_filename(roster_file.filename if roster_file else None, (".xlsx", ".xls"), "名单")
+            file_bytes = await roster_file.read()
+            roster_precheck = validate_seat_label_roster(file_bytes, id_column, num_seats)
+            if not roster_precheck["ok"]:
+                raise HTTPException(400, "名单预检未通过，请先修正错误")
+        output = generate_seat_labels_pdf_v2(
+            layout_mode=layout_mode,
+            content_mode=content_mode,
+            num_rooms=num_rooms,
+            num_seats=num_seats,
+            cols=cols,
+            rows=rows,
+            font_size=font_size,
+            roster_precheck=roster_precheck,
+            id_column=id_column.strip(),
+        )
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(400, f"考场桌贴生成失败：{str(e)}")
     return _download_response(output, "考场桌贴.pdf", "seat_labels.pdf", "application/pdf")
+
+
+@app.post("/api/tools/seat-labels/columns")
+async def tool_seat_label_columns(request: Request, roster_file: UploadFile = File(...)):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    rate_limit(f"tool_seat_label_columns_{get_client_ip(request)}", max_requests=20, window=60)
+    _ensure_filename(roster_file.filename, (".xlsx", ".xls"), "名单")
+    try:
+        columns = get_seat_label_columns(await roster_file.read())
+    except Exception as e:
+        raise HTTPException(400, f"读取名单表头失败：{str(e)}")
+    return {"columns": columns}
+
+
+@app.post("/api/tools/seat-labels/precheck")
+async def tool_seat_label_precheck(
+    request: Request,
+    id_column: str = Form(...),
+    num_seats: int = Form(30),
+    roster_file: UploadFile = File(...),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    rate_limit(f"tool_seat_label_precheck_{get_client_ip(request)}", max_requests=10, window=60)
+    _ensure_filename(roster_file.filename, (".xlsx", ".xls"), "名单")
+    try:
+        precheck = validate_seat_label_roster(await roster_file.read(), id_column, num_seats)
+    except Exception as e:
+        raise HTTPException(400, f"名单预检失败：{str(e)}")
+    safe_precheck = dict(precheck)
+    safe_precheck.pop("records", None)
+    return safe_precheck
+
+
+@app.post("/api/tools/seat-labels/precheck-report")
+async def tool_seat_label_precheck_report(
+    request: Request,
+    id_column: str = Form(...),
+    num_seats: int = Form(30),
+    roster_file: UploadFile = File(...),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    rate_limit(f"tool_seat_label_report_{get_client_ip(request)}", max_requests=10, window=60)
+    _ensure_filename(roster_file.filename, (".xlsx", ".xls"), "名单")
+    try:
+        precheck = validate_seat_label_roster(await roster_file.read(), id_column, num_seats)
+        output = generate_seat_label_precheck_report(precheck)
+    except Exception as e:
+        raise HTTPException(400, f"生成预检报告失败：{str(e)}")
+    return _download_response(
+        output,
+        "座位贴名单预检报告.xlsx",
+        "seat_label_precheck_report.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.get("/api/tools/seat-labels/template")
+async def tool_seat_label_template(request: Request):
+    check_admin_login(request)
+    check_tools_unlocked(request)
+    df = pd.DataFrame({
+        "考场号": [1, 1, 1, 2, 2],
+        "座位号": [1, 2, 3, 1, 2],
+        "姓名": ["张三", "李四", "王五", "赵六", "钱七"],
+        "学号": ["2024010101", "2024010102", "2024010103", "2024010201", "2024010202"],
+        "准考证号": ["", "", "", "", ""],
+        "身份证号": ["", "", "", "", ""],
+    })
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="座位贴名单")
+        ws = writer.book["座位贴名单"]
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+        for column in ws.columns:
+            max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column)
+            ws.column_dimensions[column[0].column_letter].width = min(max(max_length + 2, 12), 24)
+    output.seek(0)
+    return _download_response(
+        output,
+        "座位贴名单模板.xlsx",
+        "seat_label_roster_template.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @app.post("/api/tools/merge-workbook")

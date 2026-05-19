@@ -4,6 +4,7 @@ import random
 import re
 import zipfile
 from io import BytesIO
+from typing import Any
 
 import openpyxl
 import pandas as pd
@@ -182,6 +183,384 @@ def generate_seat_labels_pdf(num_rooms: int, num_seats: int = 30, cols: int = 3,
                         f"{room}-{seat:02d}",
                     )
             pdf.showPage()
+
+    pdf.save()
+    output.seek(0)
+    return output
+
+
+SEAT_LABEL_REQUIRED_COLUMNS = ["考场号", "座位号", "姓名"]
+
+
+def _read_excel_text(file_bytes: bytes) -> pd.DataFrame:
+    return pd.read_excel(BytesIO(file_bytes), dtype=str).fillna("")
+
+
+def get_seat_label_columns(file_bytes: bytes) -> list[str]:
+    df = _read_excel_text(file_bytes)
+    return [str(col).strip() for col in df.columns if str(col).strip()]
+
+
+def _clean_cell(value: Any) -> str:
+    text = "" if value is None else str(value).strip()
+    if text.endswith(".0") and re.fullmatch(r"\d+\.0", text):
+        return text[:-2]
+    return text
+
+
+def _parse_positive_int(value: Any) -> int | None:
+    text = _clean_cell(value)
+    if re.fullmatch(r"\d+", text):
+        parsed = int(text)
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _seat_key(room_no: int, seat_no: int) -> tuple[int, int]:
+    return room_no, seat_no
+
+
+def validate_seat_label_roster(
+    file_bytes: bytes,
+    id_column: str,
+    standard_seats: int = 30,
+) -> dict:
+    df = _read_excel_text(file_bytes)
+    df.columns = [str(col).strip() for col in df.columns]
+    id_column = (id_column or "").strip()
+    errors = []
+    warnings = []
+    stats = []
+    records = {}
+
+    missing = [col for col in SEAT_LABEL_REQUIRED_COLUMNS if col not in df.columns]
+    if missing:
+        errors.append({
+            "type": "缺少必要列",
+            "room_no": "",
+            "seat_no": "",
+            "names": "",
+            "message": f"缺少必要列：{'、'.join(missing)}",
+        })
+    if not id_column:
+        errors.append({
+            "type": "未选择编号字段",
+            "room_no": "",
+            "seat_no": "",
+            "names": "",
+            "message": "请选择一个编号字段",
+        })
+    elif id_column not in df.columns:
+        errors.append({
+            "type": "编号字段不存在",
+            "room_no": "",
+            "seat_no": "",
+            "names": "",
+            "message": f"编号字段不存在：{id_column}",
+        })
+
+    if errors:
+        return _build_seat_precheck_result(errors, warnings, stats, records, standard_seats)
+
+    raw_records_by_key = {}
+    room_seats = {}
+
+    for idx, row in df.iterrows():
+        excel_row = idx + 2
+        room_raw = _clean_cell(row.get("考场号"))
+        seat_raw = _clean_cell(row.get("座位号"))
+        name = _clean_cell(row.get("姓名"))
+        identifier = _clean_cell(row.get(id_column))
+        room_no = _parse_positive_int(room_raw)
+        seat_no = _parse_positive_int(seat_raw)
+
+        if room_no is None:
+            errors.append({
+                "type": "考场号不合法",
+                "room_no": room_raw,
+                "seat_no": seat_raw,
+                "names": name,
+                "message": f"第 {excel_row} 行考场号不是正整数：{room_raw or '空'}",
+            })
+            continue
+        if seat_no is None or seat_no > standard_seats:
+            errors.append({
+                "type": "座位号不合法",
+                "room_no": room_no,
+                "seat_no": seat_raw,
+                "names": name,
+                "message": f"第 {excel_row} 行座位号必须为 1-{standard_seats}：{seat_raw or '空'}",
+            })
+            continue
+        if not name:
+            errors.append({
+                "type": "姓名为空",
+                "room_no": room_no,
+                "seat_no": seat_no,
+                "names": "",
+                "message": f"第 {excel_row} 行姓名为空",
+            })
+        if not identifier:
+            errors.append({
+                "type": "编号为空",
+                "room_no": room_no,
+                "seat_no": seat_no,
+                "names": name,
+                "message": f"第 {excel_row} 行 {id_column} 为空",
+            })
+
+        key = _seat_key(room_no, seat_no)
+        raw_records_by_key.setdefault(key, []).append({
+            "excel_row": excel_row,
+            "room_no": room_no,
+            "seat_no": seat_no,
+            "name": name,
+            "identifier": identifier,
+        })
+        room_seats.setdefault(room_no, set()).add(seat_no)
+
+    for (room_no, seat_no), rows in raw_records_by_key.items():
+        if len(rows) > 1:
+            errors.append({
+                "type": "重复座位",
+                "room_no": room_no,
+                "seat_no": f"{seat_no:02d}",
+                "names": "、".join(r["name"] or f"第{r['excel_row']}行" for r in rows),
+                "message": f"{room_no}考场{seat_no:02d}号出现 {len(rows)} 条记录",
+            })
+        elif rows[0]["name"] and rows[0]["identifier"]:
+            records[(room_no, seat_no)] = rows[0]
+
+    if room_seats:
+        room_numbers = sorted(room_seats)
+        expected_rooms = set(range(1, room_numbers[-1] + 1))
+        missing_rooms = sorted(expected_rooms - set(room_numbers))
+        if room_numbers[0] != 1 or missing_rooms:
+            if room_numbers[0] != 1:
+                missing_rooms = sorted(set(range(1, room_numbers[0])) | set(missing_rooms))
+            errors.append({
+                "type": "考场号不连续",
+                "room_no": "",
+                "seat_no": "",
+                "names": "",
+                "message": f"考场号必须从 1 连续到最大考场号，缺少：{', '.join(map(str, missing_rooms))}",
+            })
+
+        for room_no in room_numbers:
+            seats = sorted(room_seats[room_no])
+            if not seats:
+                continue
+            expected_seats = set(range(1, seats[-1] + 1))
+            missing_seats = sorted(expected_seats - set(seats))
+            if seats[0] != 1 or missing_seats:
+                if seats[0] != 1:
+                    missing_seats = sorted(set(range(1, seats[0])) | set(missing_seats))
+                errors.append({
+                    "type": "座位号不连续",
+                    "room_no": room_no,
+                    "seat_no": "",
+                    "names": "",
+                    "message": f"{room_no}考场座位号中间断号，缺少：{', '.join(f'{s:02d}' for s in missing_seats)}",
+                })
+
+        for room_no in room_numbers:
+            seats = sorted(room_seats[room_no])
+            count = len(seats)
+            max_seat = seats[-1] if seats else 0
+            stats.append({
+                "room_no": room_no,
+                "count": count,
+                "seat_range": f"1-{max_seat}" if max_seat else "",
+                "full": count == standard_seats,
+                "remark": "" if count == standard_seats else f"不满员，{count}人",
+            })
+
+        seen_underfilled = None
+        for stat in stats:
+            if stat["count"] < standard_seats and seen_underfilled is None:
+                seen_underfilled = stat
+            elif stat["count"] == standard_seats and seen_underfilled is not None:
+                warnings.append({
+                    "type": "不满员考场后存在满员考场",
+                    "room_no": seen_underfilled["room_no"],
+                    "seat_no": "",
+                    "names": "",
+                    "message": f"{seen_underfilled['room_no']}考场只有{seen_underfilled['count']}人，但后续 {stat['room_no']}考场为{standard_seats}人，请确认是否为特殊安排。",
+                })
+                break
+
+    return _build_seat_precheck_result(errors, warnings, stats, records, standard_seats)
+
+
+def _build_seat_precheck_result(errors, warnings, stats, records, standard_seats: int) -> dict:
+    room_count = len(stats)
+    student_count = sum(item["count"] for item in stats)
+    underfilled = [item for item in stats if item["count"] < standard_seats]
+    return {
+        "ok": len(errors) == 0,
+        "standard_seats": standard_seats,
+        "summary": {
+            "room_count": room_count,
+            "student_count": student_count,
+            "full_room_count": room_count - len(underfilled),
+            "underfilled_room_count": len(underfilled),
+            "underfilled_rooms": underfilled,
+            "room_range": f"1-{room_count}" if room_count else "",
+        },
+        "errors": errors,
+        "warnings": warnings,
+        "stats": stats,
+        "records": records,
+    }
+
+
+def generate_seat_label_precheck_report(precheck: dict) -> BytesIO:
+    output = BytesIO()
+    summary = precheck.get("summary", {})
+    summary_rows = [
+        {"项目": "预检结果", "值": "通过" if precheck.get("ok") else "未通过"},
+        {"项目": "考场数", "值": summary.get("room_count", 0)},
+        {"项目": "考生数", "值": summary.get("student_count", 0)},
+        {"项目": "满员考场数", "值": summary.get("full_room_count", 0)},
+        {"项目": "不满员考场数", "值": summary.get("underfilled_room_count", 0)},
+        {"项目": "每考场标准座位数", "值": precheck.get("standard_seats", 30)},
+    ]
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        pd.DataFrame(summary_rows).to_excel(writer, index=False, sheet_name="摘要")
+        pd.DataFrame(precheck.get("errors") or [{"message": "无错误"}]).to_excel(writer, index=False, sheet_name="错误")
+        pd.DataFrame(precheck.get("warnings") or [{"message": "无警告"}]).to_excel(writer, index=False, sheet_name="警告")
+        pd.DataFrame(precheck.get("stats") or []).to_excel(writer, index=False, sheet_name="考场统计")
+        for ws in writer.book.worksheets:
+            for cell in ws[1]:
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="center")
+            for column in ws.columns:
+                max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column)
+                ws.column_dimensions[column[0].column_letter].width = min(max(max_length + 2, 12), 48)
+    output.seek(0)
+    return output
+
+
+def generate_seat_labels_pdf_v2(
+    layout_mode: str,
+    content_mode: str,
+    num_rooms: int | None = None,
+    num_seats: int = 30,
+    cols: int = 3,
+    rows: int = 10,
+    font_size: int = 40,
+    roster_precheck: dict | None = None,
+    id_column: str | None = None,
+) -> BytesIO:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        from reportlab.pdfgen import canvas
+    except ImportError as exc:
+        raise RuntimeError("缺少 reportlab 依赖，请先安装 requirements.txt") from exc
+
+    if layout_mode not in {"stack_cut", "room_page"}:
+        raise ValueError("生成模式无效")
+    if content_mode not in {"numbers", "roster"}:
+        raise ValueError("内容类型无效")
+    if cols != 3 or rows != 10:
+        raise ValueError("桌贴版式固定为 3 列 x 10 行")
+    if num_seats < 1:
+        raise ValueError("座位数必须大于 0")
+
+    records = {}
+    if content_mode == "roster":
+        if not roster_precheck or not roster_precheck.get("ok"):
+            raise ValueError("名单预检未通过")
+        records = roster_precheck.get("records", {})
+        num_rooms = roster_precheck.get("summary", {}).get("room_count", 0)
+        num_seats = roster_precheck.get("standard_seats", num_seats)
+        if not id_column:
+            raise ValueError("请选择编号字段")
+    if not num_rooms or num_rooms < 1:
+        raise ValueError("考场数量必须大于 0")
+
+    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+    page_width, page_height = A4
+    left_margin = right_margin = top_margin = bottom_margin = 2 * mm
+    h_spacing = v_spacing = 2 * mm
+    usable_width = page_width - left_margin - right_margin - h_spacing * (cols - 1)
+    usable_height = page_height - top_margin - bottom_margin - v_spacing * (rows - 1)
+    label_width = usable_width / cols
+    label_height = usable_height / rows
+    labels_per_page = cols * rows
+
+    output = BytesIO()
+    pdf = canvas.Canvas(output, pagesize=A4)
+
+    def label_xy(index: int):
+        col = index // rows
+        row = index % rows
+        x = left_margin + col * (label_width + h_spacing)
+        y = page_height - top_margin - (row + 1) * label_height - row * v_spacing
+        return x, y
+
+    def fit_font_size(text: str, width: float, font_name: str, max_size: int, min_size: int):
+        size = max_size
+        while size > min_size and pdf.stringWidth(text, font_name, size) > width:
+            size -= 0.5
+        return size
+
+    def draw_fit_center(text: str, x: float, y: float, width: float, font_name: str, max_size: int, min_size: int):
+        size = fit_font_size(text, width, font_name, max_size, min_size)
+        pdf.setFont(font_name, size)
+        pdf.drawCentredString(x, y, text)
+
+    def draw_fit_left(text: str, x: float, y: float, width: float, font_name: str, max_size: int, min_size: int):
+        size = fit_font_size(text, width, font_name, max_size, min_size)
+        pdf.setFont(font_name, size)
+        pdf.drawString(x, y, text)
+
+    def draw_label(index: int, room_no: int, seat_no: int):
+        x, y = label_xy(index)
+        pdf.setLineWidth(0.8)
+        pdf.setStrokeColor(colors.black)
+        pdf.rect(x, y, label_width, label_height)
+
+        record = records.get((room_no, seat_no)) if content_mode == "roster" else True
+        if not record:
+            return
+
+        title = f"{room_no}-{seat_no:02d}"
+        if content_mode == "numbers":
+            draw_fit_center(title, x + label_width / 2, y + label_height / 2 - font_size / 2.8, label_width - 4 * mm, "Helvetica-Bold", font_size, 12)
+            return
+
+        text_x = x + 4 * mm
+        info_width = label_width - 8 * mm
+        title_y = y + label_height * 0.50 - 1 * mm
+        name_y = y + label_height * 0.24
+        id_y = y + label_height * 0.10
+        draw_fit_center(title, x + label_width / 2, title_y, label_width - 5 * mm, "Helvetica-Bold", 52, 24)
+        draw_fit_left(f"姓名：{record['name']}", text_x, name_y, info_width, "STSong-Light", 10, 7)
+        draw_fit_left(f"{id_column}：{record['identifier']}", text_x, id_y, info_width, "STSong-Light", 9, 5.5)
+
+    if layout_mode == "stack_cut":
+        for seat_no in range(1, num_seats + 1):
+            pages_needed = math.ceil(num_rooms / labels_per_page)
+            for page in range(pages_needed):
+                start_room = page * labels_per_page + 1
+                rooms_this_page = min(num_rooms - page * labels_per_page, labels_per_page)
+                for idx in range(rooms_this_page):
+                    draw_label(idx, start_room + idx, seat_no)
+                pdf.showPage()
+    else:
+        seat_pages = math.ceil(num_seats / labels_per_page)
+        for room_no in range(1, num_rooms + 1):
+            for page in range(seat_pages):
+                start_seat = page * labels_per_page + 1
+                seats_this_page = min(num_seats - page * labels_per_page, labels_per_page)
+                for idx in range(seats_this_page):
+                    draw_label(idx, room_no, start_seat + idx)
+                pdf.showPage()
 
     pdf.save()
     output.seek(0)

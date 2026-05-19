@@ -156,6 +156,22 @@
             max-width: 460px;
             margin: 0 auto;
         }
+        .tool-mode-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+        }
+        .tool-mode-group .btn {
+            text-align: left;
+            border-radius: 8px !important;
+            padding: 12px 14px;
+        }
+        .tool-precheck-box {
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            background: #f8f9fa;
+            padding: 14px;
+        }
     </style>
 </head>
 <body>
@@ -533,29 +549,73 @@
                     </div>
                     <div class="tool-card">
                         <form id="toolSeatLabelsForm" data-download-name="考场桌贴.pdf">
-                            <div class="row g-3">
+                            <div class="mb-3">
+                                <label class="form-label">内容类型</label>
+                                <div class="btn-group tool-mode-group w-100" role="group">
+                                    <input type="radio" class="btn-check" name="content_mode" id="seatContentNumbers" value="numbers" checked>
+                                    <label class="btn btn-outline-primary" for="seatContentNumbers">
+                                        <strong>仅座位编号</strong><br><span class="small text-muted">不上传名单，只生成 1-01 这类编号</span>
+                                    </label>
+                                    <input type="radio" class="btn-check" name="content_mode" id="seatContentRoster" value="roster">
+                                    <label class="btn btn-outline-primary" for="seatContentRoster">
+                                        <strong>带考生信息</strong><br><span class="small text-muted">从 Excel 读取姓名和编号字段</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">生成模式</label>
+                                <div class="btn-group tool-mode-group w-100" role="group">
+                                    <input type="radio" class="btn-check" name="layout_mode" id="seatLayoutStack" value="stack_cut" checked>
+                                    <label class="btn btn-outline-primary" for="seatLayoutStack">
+                                        <strong>裁切成叠模式</strong><br><span class="small text-muted">第1页全是01号，叠齐裁切后按考场成叠</span>
+                                    </label>
+                                    <input type="radio" class="btn-check" name="layout_mode" id="seatLayoutRoom" value="room_page">
+                                    <label class="btn btn-outline-primary" for="seatLayoutRoom">
+                                        <strong>单考场整页模式</strong><br><span class="small text-muted">每页一个考场，放 01-30 号</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div id="seatNumberFields" class="row g-3">
                                 <div class="col-sm-6">
                                     <label class="form-label">考场数量</label>
-                                    <input type="number" class="form-control" name="num_rooms" min="1" required>
+                                    <input type="number" class="form-control" name="num_rooms" min="1">
                                 </div>
                                 <div class="col-sm-6">
                                     <label class="form-label">每考场座位数</label>
-                                    <input type="number" class="form-control" name="num_seats" min="1" value="30" required>
+                                    <input type="number" class="form-control" name="num_seats" min="1" max="30" value="30" required>
                                 </div>
-                                <div class="col-sm-4">
-                                    <label class="form-label">列数</label>
-                                    <input type="number" class="form-control" name="cols" min="1" value="3" required>
-                                </div>
-                                <div class="col-sm-4">
-                                    <label class="form-label">行数</label>
-                                    <input type="number" class="form-control" name="rows" min="1" value="10" required>
-                                </div>
-                                <div class="col-sm-4">
-                                    <label class="form-label">字号</label>
+                                <div class="col-sm-6">
+                                    <label class="form-label">编号字号</label>
                                     <input type="number" class="form-control" name="font_size" min="8" value="40" required>
                                 </div>
                             </div>
-                            <button type="submit" class="btn btn-custom mt-3" data-default-label="生成桌贴 PDF">生成桌贴 PDF</button>
+
+                            <div id="seatRosterFields" class="d-none">
+                                <div class="row g-3">
+                                    <div class="col-md-7">
+                                        <label class="form-label">名单 Excel</label>
+                                        <input type="file" class="form-control" id="seatRosterFile" name="roster_file" accept=".xlsx,.xls">
+                                        <div class="form-text">固定表头：考场号、座位号、姓名。<a href="/api/tools/seat-labels/template">下载名单模板</a></div>
+                                    </div>
+                                    <div class="col-md-5">
+                                        <label class="form-label">编号字段</label>
+                                        <select class="form-select" id="seatIdColumn" name="id_column" disabled>
+                                            <option value="">请先上传名单</option>
+                                        </select>
+                                        <div class="form-text">桌贴会显示“字段名：字段值”，例如 学号：2024010101。</div>
+                                    </div>
+                                </div>
+                                <div class="d-flex flex-wrap gap-2 mt-3">
+                                    <button type="button" class="btn btn-outline-primary" id="seatPrecheckBtn">预检名单</button>
+                                    <button type="button" class="btn btn-outline-secondary" id="seatReportBtn" disabled>下载预检报告</button>
+                                </div>
+                                <div id="seatPrecheckResult" class="tool-precheck-box mt-3 d-none"></div>
+                            </div>
+
+                            <input type="hidden" name="cols" value="3">
+                            <input type="hidden" name="rows" value="10">
+                            <button type="submit" class="btn btn-custom mt-3" id="seatGenerateBtn" data-default-label="生成桌贴 PDF">生成桌贴 PDF</button>
                         </form>
                     </div>
                 </div>
@@ -1794,6 +1854,17 @@
             }
         }
 
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
         function showToolLock() {
             document.getElementById('toolLockPanel')?.classList.remove('d-none');
             document.getElementById('toolHome')?.classList.add('d-none');
@@ -2348,8 +2419,195 @@
             submitToolForm(e.target, '/api/tools/invigilator-assign');
         });
 
+        let seatPrecheckOk = false;
+
+        function seatIsRosterMode() {
+            return document.querySelector('input[name="content_mode"]:checked')?.value === 'roster';
+        }
+
+        function resetSeatPrecheck() {
+            seatPrecheckOk = false;
+            document.getElementById('seatGenerateBtn').disabled = seatIsRosterMode();
+            document.getElementById('seatReportBtn').disabled = true;
+            const result = document.getElementById('seatPrecheckResult');
+            if (result) {
+                result.classList.add('d-none');
+                result.innerHTML = '';
+            }
+        }
+
+        function updateSeatModeUI() {
+            const rosterMode = seatIsRosterMode();
+            document.getElementById('seatNumberFields')?.classList.toggle('d-none', rosterMode);
+            document.getElementById('seatRosterFields')?.classList.toggle('d-none', !rosterMode);
+            const numRooms = document.querySelector('#toolSeatLabelsForm input[name="num_rooms"]');
+            if (numRooms) {
+                numRooms.required = !rosterMode;
+                numRooms.disabled = rosterMode;
+            }
+            document.getElementById('seatGenerateBtn').disabled = rosterMode && !seatPrecheckOk;
+        }
+
+        function renderSeatPrecheck(data) {
+            const result = document.getElementById('seatPrecheckResult');
+            if (!result) return;
+            const summary = data.summary || {};
+            const errors = data.errors || [];
+            const warnings = data.warnings || [];
+            const underfilled = summary.underfilled_rooms || [];
+            const status = data.ok
+                ? '<span class="badge bg-success">预检通过</span>'
+                : '<span class="badge bg-danger">预检未通过</span>';
+            let html = `<div class="d-flex justify-content-between align-items-center mb-2"><strong>${status}</strong><span class="small text-muted">标准座位数：${data.standard_seats || 30}</span></div>`;
+            html += `<div class="small mb-2">共 <strong>${summary.room_count || 0}</strong> 个考场，<strong>${summary.student_count || 0}</strong> 名考生；满员考场 ${summary.full_room_count || 0} 个，不满员考场 ${summary.underfilled_room_count || 0} 个。</div>`;
+            if (underfilled.length) {
+                html += `<div class="small text-muted mb-2">不满员：${underfilled.map(r => `${escapeHtml(r.room_no)}考场${escapeHtml(r.count)}人`).join('、')}</div>`;
+            }
+            if (errors.length) {
+                html += '<div class="alert alert-danger py-2 mb-2"><strong>错误</strong><ul class="mb-0 ps-3">';
+                html += errors.slice(0, 12).map(item => `<li>${escapeHtml(item.message || '')}</li>`).join('');
+                html += errors.length > 12 ? `<li>还有 ${errors.length - 12} 条错误，请下载预检报告查看。</li>` : '';
+                html += '</ul></div>';
+            }
+            if (warnings.length) {
+                html += '<div class="alert alert-warning py-2 mb-0"><strong>警告</strong><ul class="mb-0 ps-3">';
+                html += warnings.slice(0, 8).map(item => `<li>${escapeHtml(item.message || '')}</li>`).join('');
+                html += warnings.length > 8 ? `<li>还有 ${warnings.length - 8} 条警告，请下载预检报告查看。</li>` : '';
+                html += '</ul></div>';
+            }
+            result.innerHTML = html;
+            result.classList.remove('d-none');
+        }
+
+        async function loadSeatRosterColumns() {
+            resetSeatPrecheck();
+            const fileInput = document.getElementById('seatRosterFile');
+            const select = document.getElementById('seatIdColumn');
+            if (!fileInput?.files?.length || !select) return;
+            select.disabled = true;
+            select.innerHTML = '<option value="">读取表头中...</option>';
+            const data = new FormData();
+            data.append('roster_file', fileInput.files[0]);
+            try {
+                const res = await fetch('/api/tools/seat-labels/columns', {
+                    method: 'POST',
+                    body: data,
+                    headers: { 'X-CSRF-Token': getCsrf() }
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || '读取表头失败', 'danger');
+                    select.innerHTML = '<option value="">读取失败</option>';
+                    return;
+                }
+                const body = await res.json();
+                const columns = (body.columns || []).filter(c => !['考场号', '座位号', '姓名'].includes(c));
+                if (!columns.length) {
+                    select.innerHTML = '<option value="">没有可用编号字段</option>';
+                    showToast('名单中没有除考场号、座位号、姓名以外的编号字段', 'warning');
+                    return;
+                }
+                select.innerHTML = '<option value="">请选择编号字段</option>' + columns.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+                select.disabled = false;
+            } catch (err) {
+                select.innerHTML = '<option value="">读取失败</option>';
+                showToast('读取表头失败，请重试', 'danger');
+            }
+        }
+
+        async function runSeatPrecheck() {
+            const form = document.getElementById('toolSeatLabelsForm');
+            const fileInput = document.getElementById('seatRosterFile');
+            const idColumn = document.getElementById('seatIdColumn')?.value || '';
+            if (!fileInput?.files?.length) {
+                showToast('请先上传名单 Excel', 'warning');
+                return;
+            }
+            if (!idColumn) {
+                showToast('请选择编号字段', 'warning');
+                return;
+            }
+            const button = document.getElementById('seatPrecheckBtn');
+            const defaultLabel = button.textContent;
+            button.disabled = true;
+            button.textContent = '预检中...';
+            const data = new FormData();
+            data.append('roster_file', fileInput.files[0]);
+            data.append('id_column', idColumn);
+            data.append('num_seats', form.querySelector('input[name="num_seats"]').value || '30');
+            try {
+                const res = await fetch('/api/tools/seat-labels/precheck', {
+                    method: 'POST',
+                    body: data,
+                    headers: { 'X-CSRF-Token': getCsrf() }
+                });
+                const body = await res.json();
+                if (!res.ok) {
+                    showToast(body.detail || '预检失败', 'danger');
+                    return;
+                }
+                seatPrecheckOk = !!body.ok;
+                renderSeatPrecheck(body);
+                document.getElementById('seatReportBtn').disabled = false;
+                document.getElementById('seatGenerateBtn').disabled = !seatPrecheckOk;
+                showToast(body.ok ? '预检通过，可以生成 PDF' : '预检未通过，请修正错误', body.ok ? 'success' : 'danger');
+            } catch (err) {
+                showToast('预检失败，请重试', 'danger');
+            } finally {
+                button.disabled = false;
+                button.textContent = defaultLabel;
+            }
+        }
+
+        async function downloadSeatPrecheckReport() {
+            const form = document.getElementById('toolSeatLabelsForm');
+            const fileInput = document.getElementById('seatRosterFile');
+            const idColumn = document.getElementById('seatIdColumn')?.value || '';
+            if (!fileInput?.files?.length || !idColumn) {
+                showToast('请先上传名单并选择编号字段', 'warning');
+                return;
+            }
+            const data = new FormData();
+            data.append('roster_file', fileInput.files[0]);
+            data.append('id_column', idColumn);
+            data.append('num_seats', form.querySelector('input[name="num_seats"]').value || '30');
+            try {
+                const res = await fetch('/api/tools/seat-labels/precheck-report', {
+                    method: 'POST',
+                    body: data,
+                    headers: { 'X-CSRF-Token': getCsrf() }
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || '下载报告失败', 'danger');
+                    return;
+                }
+                const filename = getFilenameFromDisposition(res.headers.get('Content-Disposition'), '座位贴名单预检报告.xlsx');
+                downloadBlob(await res.blob(), filename);
+                showToast('预检报告已开始下载', 'success');
+            } catch (err) {
+                showToast('下载报告失败，请重试', 'danger');
+            }
+        }
+
+        document.querySelectorAll('input[name="content_mode"], input[name="layout_mode"]').forEach(input => {
+            input.addEventListener('change', () => {
+                if (input.name === 'content_mode') resetSeatPrecheck();
+                updateSeatModeUI();
+            });
+        });
+        document.getElementById('seatRosterFile')?.addEventListener('change', loadSeatRosterColumns);
+        document.getElementById('seatIdColumn')?.addEventListener('change', resetSeatPrecheck);
+        document.getElementById('seatPrecheckBtn')?.addEventListener('click', runSeatPrecheck);
+        document.getElementById('seatReportBtn')?.addEventListener('click', downloadSeatPrecheckReport);
+        updateSeatModeUI();
+
         document.getElementById('toolSeatLabelsForm')?.addEventListener('submit', e => {
             e.preventDefault();
+            if (seatIsRosterMode() && !seatPrecheckOk) {
+                showToast('请先完成名单预检，预检通过后才能生成', 'warning');
+                return;
+            }
             submitToolForm(e.target, '/api/tools/seat-labels');
         });
 
