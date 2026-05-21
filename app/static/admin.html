@@ -1988,12 +1988,14 @@
                 return;
             }
             el.innerHTML = `<table class="table table-sm table-hover align-middle">
-                <thead><tr><th>批次</th><th>级别</th><th>类型</th><th>记录数</th><th>来源文件</th><th>上传时间</th></tr></thead>
+                <thead><tr><th>批次</th><th>级别</th><th>类型</th><th>记录数</th><th>通过人数</th><th>通过比例</th><th>来源文件</th><th>上传时间</th></tr></thead>
                 <tbody>${list.map(item => `<tr>
                     <td>${escapeHtml(item.batch_name)}</td>
                     <td>${escapeHtml(item.exam_level_label)}</td>
                     <td>${escapeHtml(item.batch_variant_label)}</td>
                     <td>${item.record_count}</td>
+                    <td>${item.pass_count ?? 0}</td>
+                    <td>${item.pass_rate ?? 0}%</td>
                     <td class="text-muted small">${escapeHtml(item.source_filenames || '')}</td>
                     <td class="text-muted small">${escapeHtml(item.upload_time || '')}</td>
                 </tr>`).join('')}</tbody>

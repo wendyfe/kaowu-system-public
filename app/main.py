@@ -2014,6 +2014,12 @@ async def cet_data_overview(request: Request, db: Session = Depends(get_db)):
         CetExamBatch.exam_level,
         CetExamBatch.batch_variant,
     ).all()
+    pass_counts = dict(
+        db.query(CetScore.batch_id, func.count(CetScore.id))
+        .filter(CetScore.total_score >= PASS_SCORE)
+        .group_by(CetScore.batch_id)
+        .all()
+    )
     graduate_batches = db.query(GraduateBatch).order_by(GraduateBatch.grade_name.desc()).all()
     return {
         "score_batches": [{
@@ -2028,6 +2034,8 @@ async def cet_data_overview(request: Request, db: Session = Depends(get_db)):
             "batch_variant_label": VARIANT_LABELS.get(b.batch_variant, b.batch_variant),
             "recognition_status": b.recognition_status,
             "record_count": b.record_count,
+            "pass_count": pass_counts.get(b.id, 0),
+            "pass_rate": round((pass_counts.get(b.id, 0) / b.record_count) * 100, 2) if b.record_count else 0,
             "source_filenames": b.source_filenames,
             "upload_time": b.upload_time.strftime("%Y-%m-%d %H:%M") if b.upload_time else None,
         } for b in score_batches],
