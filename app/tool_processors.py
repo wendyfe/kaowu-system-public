@@ -485,12 +485,11 @@ def generate_seat_labels_pdf_v2(
 
     pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
     page_width, page_height = A4
-    left_margin = right_margin = top_margin = bottom_margin = 2 * mm
-    h_spacing = v_spacing = 2 * mm
-    usable_width = page_width - left_margin - right_margin - h_spacing * (cols - 1)
-    usable_height = page_height - top_margin - bottom_margin - v_spacing * (rows - 1)
-    label_width = usable_width / cols
-    label_height = usable_height / rows
+    cell_width = page_width / cols
+    cell_height = page_height / rows
+    label_inset = 1 * mm
+    label_width = cell_width - label_inset * 2
+    label_height = cell_height - label_inset * 2
     labels_per_page = cols * rows
 
     output = BytesIO()
@@ -499,8 +498,10 @@ def generate_seat_labels_pdf_v2(
     def label_xy(index: int):
         col = index // rows
         row = index % rows
-        x = left_margin + col * (label_width + h_spacing)
-        y = page_height - top_margin - (row + 1) * label_height - row * v_spacing
+        cell_x = col * cell_width
+        cell_y = page_height - (row + 1) * cell_height
+        x = cell_x + label_inset
+        y = cell_y + label_inset
         return x, y
 
     def fit_font_size(text: str, width: float, font_name: str, max_size: int, min_size: int):
@@ -519,6 +520,11 @@ def generate_seat_labels_pdf_v2(
         pdf.setFont(font_name, size)
         pdf.drawString(x, y, text)
 
+    def draw_fit_right(text: str, right_x: float, y: float, width: float, font_name: str, max_size: int, min_size: int):
+        size = fit_font_size(text, width, font_name, max_size, min_size)
+        pdf.setFont(font_name, size)
+        pdf.drawRightString(right_x, y, text)
+
     def draw_label(index: int, room_no: int, seat_no: int):
         x, y = label_xy(index)
         pdf.setLineWidth(0.8)
@@ -534,12 +540,12 @@ def generate_seat_labels_pdf_v2(
             draw_fit_center(title, x + label_width / 2, y + label_height / 2 - font_size / 2.8, label_width - 4 * mm, "Helvetica-Bold", font_size, 12)
             return
 
-        text_x = x + 4 * mm
-        info_width = label_width - 8 * mm
+        text_x = x + 2 * mm
+        info_width = label_width - 4 * mm
         title_y = y + label_height * 0.50 - 1 * mm
         name_y = y + label_height * 0.24
         id_y = y + label_height * 0.10
-        draw_fit_center(title, x + label_width / 2, title_y, label_width - 5 * mm, "Helvetica-Bold", 52, 24)
+        draw_fit_right(title, x + label_width - 2 * mm, title_y, info_width, "Helvetica-Bold", 52, 24)
         draw_fit_left(f"姓名：{record['name']}", text_x, name_y, info_width, "STSong-Light", 10, 7)
         draw_fit_left(f"{id_column}：{record['identifier']}", text_x, id_y, info_width, "STSong-Light", 9, 5.5)
 
