@@ -444,6 +444,7 @@ def generate_seat_label_precheck_report(precheck: dict) -> BytesIO:
 def generate_seat_labels_pdf_v2(
     layout_mode: str,
     content_mode: str,
+    border_mode: str = "print",
     num_rooms: int | None = None,
     num_seats: int = 30,
     cols: int = 3,
@@ -466,6 +467,8 @@ def generate_seat_labels_pdf_v2(
         raise ValueError("生成模式无效")
     if content_mode not in {"numbers", "roster"}:
         raise ValueError("内容类型无效")
+    if border_mode not in {"print", "none"}:
+        raise ValueError("边框模式无效")
     if cols != 3 or rows != 10:
         raise ValueError("桌贴版式固定为 3 列 x 10 行")
     if num_seats < 1:
@@ -487,9 +490,10 @@ def generate_seat_labels_pdf_v2(
     page_width, page_height = A4
     cell_width = page_width / cols
     cell_height = page_height / rows
-    label_inset = 1 * mm
+    label_inset = 2 * mm
     label_width = cell_width - label_inset * 2
     label_height = cell_height - label_inset * 2
+    print_safe_margin = 6 * mm
     labels_per_page = cols * rows
 
     output = BytesIO()
@@ -502,7 +506,7 @@ def generate_seat_labels_pdf_v2(
         cell_y = page_height - (row + 1) * cell_height
         x = cell_x + label_inset
         y = cell_y + label_inset
-        return x, y
+        return x, y, col, row
 
     def fit_font_size(text: str, width: float, font_name: str, max_size: int, min_size: int):
         size = max_size
@@ -526,26 +530,49 @@ def generate_seat_labels_pdf_v2(
         pdf.drawRightString(right_x, y, text)
 
     def draw_label(index: int, room_no: int, seat_no: int):
-        x, y = label_xy(index)
-        pdf.setLineWidth(0.8)
-        pdf.setStrokeColor(colors.black)
-        pdf.rect(x, y, label_width, label_height)
+        x, y, col, row = label_xy(index)
+        if border_mode == "print":
+            pdf.setLineWidth(0.8)
+            pdf.setStrokeColor(colors.black)
+            pdf.rect(x, y, label_width, label_height)
 
         record = records.get((room_no, seat_no)) if content_mode == "roster" else True
         if not record:
             return
 
         title = f"{room_no}-{seat_no:02d}"
+        content_left = x + 2 * mm
+        content_right = x + label_width - 2 * mm
+        if border_mode == "none":
+            if col == 0:
+                content_left = max(content_left, print_safe_margin)
+            if col == cols - 1:
+                content_right = min(content_right, page_width - print_safe_margin)
+        content_width = content_right - content_left
+
         if content_mode == "numbers":
-            draw_fit_center(title, x + label_width / 2, y + label_height / 2 - font_size / 2.8, label_width - 4 * mm, "Helvetica-Bold", font_size, 12)
+            draw_fit_center(title, content_left + content_width / 2, y + label_height / 2 - font_size / 2.8, content_width, "Helvetica-Bold", font_size, 12)
             return
 
-        text_x = x + 2 * mm
-        info_width = label_width - 4 * mm
+        text_x = content_left
+        info_width = content_width
         title_y = y + label_height * 0.50 - 1 * mm
         name_y = y + label_height * 0.24
         id_y = y + label_height * 0.10
-        draw_fit_right(title, x + label_width - 2 * mm, title_y, info_width, "Helvetica-Bold", 52, 24)
+        if border_mode == "none":
+            title_top = title_y + 52 * 0.72
+            id_bottom = id_y - 9 * 0.28
+            if row == 0 and title_top > page_height - print_safe_margin:
+                shift = title_top - (page_height - print_safe_margin)
+                title_y -= shift
+                name_y -= shift
+                id_y -= shift
+            if row == rows - 1 and id_bottom < print_safe_margin:
+                shift = print_safe_margin - id_bottom
+                title_y += shift
+                name_y += shift
+                id_y += shift
+        draw_fit_right(title, content_right, title_y, info_width, "Helvetica-Bold", 52, 24)
         draw_fit_left(f"姓名：{record['name']}", text_x, name_y, info_width, "STSong-Light", 10, 7)
         draw_fit_left(f"{id_column}：{record['identifier']}", text_x, id_y, info_width, "STSong-Light", 9, 5.5)
 

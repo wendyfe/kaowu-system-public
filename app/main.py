@@ -2493,6 +2493,7 @@ async def tool_seat_labels(
     request: Request,
     content_mode: str = Form("numbers"),
     layout_mode: str = Form("stack_cut"),
+    border_mode: str = Form("print"),
     id_column: str = Form(""),
     roster_file: UploadFile | None = File(None),
     num_rooms: int | None = Form(None),
@@ -2516,6 +2517,7 @@ async def tool_seat_labels(
         output = generate_seat_labels_pdf_v2(
             layout_mode=layout_mode,
             content_mode=content_mode,
+            border_mode=border_mode,
             num_rooms=num_rooms,
             num_seats=num_seats,
             cols=cols,
