@@ -445,6 +445,7 @@ def generate_seat_labels_pdf_v2(
     layout_mode: str,
     content_mode: str,
     border_mode: str = "print",
+    exam_badge: str = "",
     num_rooms: int | None = None,
     num_seats: int = 30,
     cols: int = 3,
@@ -469,6 +470,7 @@ def generate_seat_labels_pdf_v2(
         raise ValueError("内容类型无效")
     if border_mode not in {"print", "none"}:
         raise ValueError("边框模式无效")
+    exam_badge = (exam_badge or "").strip()
     if cols != 3 or rows != 10:
         raise ValueError("桌贴版式固定为 3 列 x 10 行")
     if num_seats < 1:
@@ -572,6 +574,8 @@ def generate_seat_labels_pdf_v2(
                 title_y += shift
                 name_y += shift
                 id_y += shift
+        if exam_badge:
+            draw_fit_left(exam_badge, text_x, title_y + 52 * 0.08, info_width * 0.42, "Helvetica-Bold", 16, 9)
         draw_fit_right(title, content_right, title_y, info_width, "Helvetica-Bold", 52, 24)
         draw_fit_left(f"姓名：{record['name']}", text_x, name_y, info_width, "STSong-Light", 10, 7)
         draw_fit_left(f"{id_column}：{record['identifier']}", text_x, id_y, info_width, "STSong-Light", 9, 5.5)
