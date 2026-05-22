@@ -575,10 +575,10 @@ def generate_seat_labels_pdf_v2(
 
         left_lines = []
         if exam_badge:
-            left_lines.append((exam_badge, "STSong-Light", 13, 8))
+            left_lines.append((exam_badge, "STSong-Light", 10, 8))
         left_lines.extend([
-            (f"第{room_no}考场", "STSong-Light", 12, 8),
-            (f"姓名：{record['name']}", "STSong-Light", 10, 7),
+            (f"第{room_no}考场", "STSong-Light", 10, 8),
+            (f"姓名：{record['name']}", "STSong-Light", 10, 6),
             (f"{id_column}：{record['identifier']}", "STSong-Light", 9, 5.5),
         ])
         line_gap = 2.2
