@@ -562,7 +562,7 @@ def generate_seat_labels_pdf_v2(
         name_y = y + label_height * 0.24
         id_y = y + label_height * 0.10
         if border_mode == "none":
-            title_top = title_y + 52 * 0.72
+            title_top = title_y + 48 * 0.72
             id_bottom = id_y - 9 * 0.28
             if row == 0 and title_top > page_height - print_safe_margin:
                 shift = title_top - (page_height - print_safe_margin)
@@ -575,8 +575,8 @@ def generate_seat_labels_pdf_v2(
                 name_y += shift
                 id_y += shift
         if exam_badge:
-            draw_fit_left(exam_badge, text_x, title_y + 52 * 0.08, info_width * 0.42, "Helvetica-Bold", 16, 9)
-        draw_fit_right(title, content_right, title_y, info_width, "Helvetica-Bold", 52, 24)
+            draw_fit_left(exam_badge, text_x, title_y + 48 * 0.08, info_width * 0.42, "STSong-Light", 16, 9)
+        draw_fit_right(title, content_right, title_y, info_width, "Helvetica-Bold", 48, 24)
         draw_fit_left(f"姓名：{record['name']}", text_x, name_y, info_width, "STSong-Light", 10, 7)
         draw_fit_left(f"{id_column}：{record['identifier']}", text_x, id_y, info_width, "STSong-Light", 9, 5.5)
 
