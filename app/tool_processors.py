@@ -558,27 +558,46 @@ def generate_seat_labels_pdf_v2(
 
         text_x = content_left
         info_width = content_width
-        title_y = y + label_height * 0.50 - 1 * mm
-        name_y = y + label_height * 0.24
-        id_y = y + label_height * 0.10
+        content_bottom = y
+        content_top = y + label_height
         if border_mode == "none":
-            title_top = title_y + 48 * 0.72
-            id_bottom = id_y - 9 * 0.28
-            if row == 0 and title_top > page_height - print_safe_margin:
-                shift = title_top - (page_height - print_safe_margin)
-                title_y -= shift
-                name_y -= shift
-                id_y -= shift
-            if row == rows - 1 and id_bottom < print_safe_margin:
-                shift = print_safe_margin - id_bottom
-                title_y += shift
-                name_y += shift
-                id_y += shift
+            if row == 0:
+                content_top = min(content_top, page_height - print_safe_margin)
+            if row == rows - 1:
+                content_bottom = max(content_bottom, print_safe_margin)
+
+        section_gap = 2 * mm
+        right_width = info_width * 0.32
+        left_width = info_width - right_width - section_gap
+        right_left = content_right - right_width
+        right_center_x = right_left + right_width / 2
+        content_center_y = content_bottom + (content_top - content_bottom) / 2
+
+        left_lines = []
         if exam_badge:
-            draw_fit_left(exam_badge, text_x, title_y + 48 * 0.08, info_width * 0.42, "STSong-Light", 16, 9)
-        draw_fit_right(title, content_right, title_y, info_width, "Helvetica-Bold", 48, 24)
-        draw_fit_left(f"姓名：{record['name']}", text_x, name_y, info_width, "STSong-Light", 10, 7)
-        draw_fit_left(f"{id_column}：{record['identifier']}", text_x, id_y, info_width, "STSong-Light", 9, 5.5)
+            left_lines.append((exam_badge, "STSong-Light", 13, 8))
+        left_lines.extend([
+            (f"第{room_no}考场", "STSong-Light", 12, 8),
+            (f"姓名：{record['name']}", "STSong-Light", 10, 7),
+            (f"{id_column}：{record['identifier']}", "STSong-Light", 9, 5.5),
+        ])
+        line_gap = 2.2
+        line_sizes = [fit_font_size(text, left_width, font, max_size, min_size) for text, font, max_size, min_size in left_lines]
+        line_heights = [size * 1.1 for size in line_sizes]
+        total_left_height = sum(line_heights) + line_gap * (len(line_heights) - 1)
+        left_top = content_center_y + total_left_height / 2
+        current_y = left_top
+        for (text, font, _, _), size, height in zip(left_lines, line_sizes, line_heights):
+            baseline = current_y - height * 0.82
+            pdf.setFont(font, size)
+            pdf.drawString(text_x, baseline, text)
+            current_y -= height + line_gap
+
+        seat_text = f"{seat_no:02d}"
+        seat_size = fit_font_size(seat_text, right_width, "Helvetica-Bold", 60, 36)
+        seat_y = content_center_y - seat_size * 0.34
+        pdf.setFont("Helvetica-Bold", seat_size)
+        pdf.drawCentredString(right_center_x, seat_y, seat_text)
 
     if layout_mode == "stack_cut":
         room_batches = math.ceil(num_rooms / labels_per_page)
