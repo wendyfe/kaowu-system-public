@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>培训视频学习 - 考务报名管理系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/style.css?v=3" rel="stylesheet">
+</head>
+<body>
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 9999">
+        <div id="toast" class="toast align-items-center border-0" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body" id="toastMessage"></div>
+                <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="关闭"></button>
+            </div>
+        </div>
+    </div>
+
+    <header class="header text-center">
+        <div class="container">
+            <h1 class="mb-3">考务培训视频</h1>
+            <p class="lead">完成报名后使用学号和手机号进入学习</p>
+        </div>
+    </header>
+
+    <div class="content-wrapper">
+        <div class="container mt-5 mb-5">
+            <div id="authCard" class="card p-5 mb-4">
+                <h3 class="mb-4">身份验证</h3>
+                <form id="authForm">
+                    <input type="hidden" id="registrationId">
+                    <div class="mb-3">
+                        <label class="form-label">学号</label>
+                        <input type="text" id="studentId" class="form-control" placeholder="8位数字学号" required>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label">手机号</label>
+                        <input type="text" id="phone" class="form-control" placeholder="11位数字手机号" required>
+                    </div>
+                    <button type="submit" class="btn btn-custom w-100">进入学习</button>
+                </form>
+                <div id="registrationChoices" class="mt-4"></div>
+            </div>
+
+            <div id="learningCard" class="card p-4" style="display:none;">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                        <h3 class="mb-1" id="trainingTitle">培训视频</h3>
+                        <div class="text-muted" id="trainingMeta"></div>
+                    </div>
+                    <a href="/student" class="btn btn-outline-secondary btn-sm">返回学生入口</a>
+                </div>
+
+                <div class="alert alert-warning py-2 mb-3" id="videoMissing" style="display:none;">
+                    培训视频尚未配置，请联系管理员。
+                </div>
+
+                <video id="trainingVideo" class="w-100 bg-dark rounded" controls controlsList="nodownload" playsinline preload="metadata" style="max-height:62vh;">
+                    当前浏览器不支持视频播放。
+                </video>
+
+                <div class="row g-3 mt-3 align-items-center">
+                    <div class="col-md-4">
+                        <label class="form-label">播放倍速</label>
+                        <select id="playbackRate" class="form-select">
+                            <option value="0.75">0.75x</option>
+                            <option value="1" selected>1x</option>
+                            <option value="1.25">1.25x</option>
+                            <option value="1.5">1.5x</option>
+                            <option value="2">2x</option>
+                        </select>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label">学习进度</label>
+                        <div class="progress" style="height:18px;">
+                            <div id="progressBar" class="progress-bar" style="width:0%">0%</div>
+                        </div>
+                        <div class="small text-muted mt-1" id="progressText"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <div class="container">
+            <p class="mb-0">© 2026 考务报名管理系统 - 所有权利保留</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let statusData = null;
+        let maxWatched = 0;
+        let lastSafeTime = 0;
+        let progressTimer = null;
+
+        function showToast(message, type) {
+            const toastEl = document.getElementById('toast');
+            document.getElementById('toastMessage').textContent = message;
+            toastEl.className = 'toast align-items-center border-0 text-bg-' + (type || 'info');
+            bootstrap.Toast.getOrCreateInstance(toastEl).show();
+        }
+
+        function formatSeconds(value) {
+            const seconds = Math.max(0, Math.floor(value || 0));
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            if (h) return `${h}小时${String(m).padStart(2, '0')}分${String(s).padStart(2, '0')}秒`;
+            return `${m}分${String(s).padStart(2, '0')}秒`;
+        }
+
+        function setProgress(data) {
+            statusData = data;
+            maxWatched = Math.max(maxWatched, data.max_watched_seconds || 0);
+            lastSafeTime = maxWatched;
+            const duration = data.duration_seconds || document.getElementById('trainingVideo').duration || 0;
+            const pct = duration ? Math.min(100, Math.round(maxWatched / duration * 1000) / 10) : (data.progress_pct || 0);
+            const bar = document.getElementById('progressBar');
+            bar.style.width = pct + '%';
+            bar.textContent = pct + '%';
+            bar.className = 'progress-bar ' + (data.is_completed ? 'bg-success' : 'bg-primary');
+            document.getElementById('progressText').textContent = `${data.training_status || '未开始'}，最远观看：${formatSeconds(maxWatched)}${duration ? ' / ' + formatSeconds(duration) : ''}`;
+        }
+
+        function showChoices(items) {
+            const box = document.getElementById('registrationChoices');
+            box.textContent = '';
+            const title = document.createElement('div');
+            title.className = 'fw-bold mb-2';
+            title.textContent = '请选择要学习的报名项目';
+            box.appendChild(title);
+            items.forEach(item => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-outline-primary w-100 mb-2 text-start';
+                btn.textContent = `${item.recruit_name}（报名时间：${item.create_time}）`;
+                btn.addEventListener('click', () => {
+                    document.getElementById('registrationId').value = item.registration_id;
+                    document.getElementById('authForm').dispatchEvent(new Event('submit'));
+                });
+                box.appendChild(btn);
+            });
+        }
+
+        async function authenticate() {
+            const formData = new FormData();
+            formData.append('student_id', document.getElementById('studentId').value.trim());
+            formData.append('phone', document.getElementById('phone').value.trim());
+            const regId = document.getElementById('registrationId').value;
+            if (regId) formData.append('registration_id', regId);
+
+            const res = await fetch('/api/training/auth', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || '验证失败');
+            if (data.need_select) {
+                showChoices(data.registrations || []);
+                return;
+            }
+            startLearning(data.status);
+        }
+
+        async function loadStatus() {
+            const res = await fetch('/api/training/status');
+            if (!res.ok) return;
+            const data = await res.json();
+            startLearning(data);
+        }
+
+        function startLearning(data) {
+            document.getElementById('authCard').style.display = 'none';
+            document.getElementById('learningCard').style.display = '';
+            document.getElementById('trainingTitle').textContent = data.recruit_name || '培训视频';
+            document.getElementById('trainingMeta').textContent = `${data.name}（${data.student_id}）`;
+            document.getElementById('videoMissing').style.display = data.video_available ? 'none' : '';
+            const video = document.getElementById('trainingVideo');
+            if (data.video_available && !video.src) video.src = '/api/training/video';
+            setProgress(data);
+            if (data.current_seconds && data.current_seconds <= maxWatched) {
+                video.currentTime = data.current_seconds;
+            }
+            if (!progressTimer) {
+                progressTimer = setInterval(() => reportProgress(false), 30000);
+            }
+        }
+
+        async function reportProgress(useBeacon) {
+            const video = document.getElementById('trainingVideo');
+            if (!statusData) return;
+            const duration = Math.floor(video.duration || statusData.duration_seconds || 0);
+            const body = new URLSearchParams();
+            body.set('current_seconds', String(Math.floor(video.currentTime || 0)));
+            body.set('watched_seconds', String(Math.floor(maxWatched || 0)));
+            body.set('duration_seconds', String(duration));
+            if (useBeacon && navigator.sendBeacon) {
+                navigator.sendBeacon('/api/training/progress', body);
+                return;
+            }
+            try {
+                const res = await fetch('/api/training/progress', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                    body
+                });
+                const data = await res.json();
+                if (res.ok) setProgress(data);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        document.getElementById('authForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.textContent = '验证中...';
+            try {
+                await authenticate();
+            } catch (err) {
+                showToast(err.message || '验证失败', 'danger');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '进入学习';
+            }
+        });
+
+        document.getElementById('playbackRate').addEventListener('change', (e) => {
+            document.getElementById('trainingVideo').playbackRate = Number(e.target.value);
+        });
+
+        const video = document.getElementById('trainingVideo');
+        video.addEventListener('loadedmetadata', () => {
+            if (statusData) setProgress(statusData);
+        });
+        video.addEventListener('timeupdate', () => {
+            if (!video.seeking && !video.paused) {
+                maxWatched = Math.max(maxWatched, video.currentTime);
+                lastSafeTime = Math.max(lastSafeTime, video.currentTime);
+                setProgress({ ...statusData, max_watched_seconds: Math.floor(maxWatched), duration_seconds: Math.floor(video.duration || 0) });
+            }
+        });
+        video.addEventListener('seeking', () => {
+            if (video.currentTime > maxWatched + 3) {
+                video.currentTime = Math.max(0, lastSafeTime);
+                showToast('只能拖动到已经学习过的位置', 'warning');
+            }
+        });
+        video.addEventListener('ended', () => reportProgress(false));
+        window.addEventListener('beforeunload', () => reportProgress(true));
+
+        loadStatus();
+    </script>
+</body>
+</html>

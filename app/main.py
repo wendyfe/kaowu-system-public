@@ -94,6 +94,13 @@ if SECRET_KEY == "kaowu_2026_secret":
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 TOOLS_PIN = os.getenv("KAOWU_TOOLS_PIN")
 TOOLS_UNLOCK_MAX_AGE = int(os.getenv("KAOWU_TOOLS_UNLOCK_MAX_AGE", 3600))
+TRAINING_VIDEO_PATH = os.getenv(
+    "TRAINING_VIDEO_PATH",
+    str(Path(__file__).resolve().parent / "protected_videos" / "training.mp4")
+)
+TRAINING_VIDEO_DURATION_SECONDS = int(os.getenv("TRAINING_VIDEO_DURATION_SECONDS", "0") or 0)
+TRAINING_COOKIE_MAX_AGE = int(os.getenv("TRAINING_COOKIE_MAX_AGE", str(24 * 3600)))
+TRAINING_COMPLETE_RATIO = 0.95
 
 # 新增邮箱配置
 SMTP_USER = os.getenv("SMTP_USER")
@@ -218,6 +225,21 @@ class Registration(Base):
     has_experience = Column(Boolean, nullable=False, default=False)  # True=有经验, False=无经验
     gender = Column(String(4), nullable=False, default="男")  # "男" 或 "女"
     __table_args__ = (UniqueConstraint('recruitment_id', 'student_id', name='uq_registration_recruitment_student'),)
+
+
+class TrainingProgress(Base):
+    """公共培训视频学习进度：每条报名记录一份进度。"""
+    __tablename__ = "training_progress"
+    id = Column(Integer, primary_key=True)
+    registration_id = Column(Integer, nullable=False)
+    current_seconds = Column(Integer, nullable=False, default=0)
+    max_watched_seconds = Column(Integer, nullable=False, default=0)
+    duration_seconds = Column(Integer, nullable=False, default=0)
+    is_completed = Column(Boolean, nullable=False, default=False)
+    started_at = Column(DateTime, nullable=True)
+    last_active_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    __table_args__ = (UniqueConstraint('registration_id', name='uq_training_progress_registration'),)
 
 # 新增验证码记录表（可选，替代内存存储）
 class VerifyCode(Base):
@@ -424,6 +446,10 @@ try:
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cet_scores_id_card ON cet_scores (id_card)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_graduate_records_id_card ON graduate_records (id_card)"))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_training_progress_registration
+            ON training_progress (registration_id)
+        """))
         conn.commit()
 except Exception as e:
     print(f"WARNING: failed to create database indexes/constraints: {e}")
@@ -899,6 +925,104 @@ def check_tools_unlocked(request: Request):
     except Exception:
         raise HTTPException(status_code=403, detail="工具页解锁已失效，请重新输入 PIN")
 
+
+def format_seconds(value: int | None) -> str:
+    seconds = max(0, int(value or 0))
+    minutes, sec = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}小时{minutes:02d}分{sec:02d}秒"
+    return f"{minutes}分{sec:02d}秒"
+
+
+def get_training_cookie_registration(request: Request, db: Session) -> Registration:
+    token = request.cookies.get("kaowu_training")
+    if not token:
+        raise HTTPException(401, "请先验证学号和手机号")
+    try:
+        data = serializer.loads(token, max_age=TRAINING_COOKIE_MAX_AGE)
+    except Exception:
+        raise HTTPException(401, "培训登录已失效，请重新验证")
+
+    reg_id = data.get("registration_id") if isinstance(data, dict) else None
+    student_id = data.get("student_id") if isinstance(data, dict) else None
+    phone = data.get("phone") if isinstance(data, dict) else None
+    if not reg_id or not student_id or not phone:
+        raise HTTPException(401, "培训登录已失效，请重新验证")
+
+    reg = db.query(Registration).filter(
+        Registration.id == int(reg_id),
+        Registration.student_id == student_id,
+        Registration.phone == phone
+    ).first()
+    if not reg:
+        raise HTTPException(401, "报名记录不存在，请重新验证")
+    return reg
+
+
+def get_or_create_training_progress(registration_id: int, db: Session) -> TrainingProgress:
+    progress = db.query(TrainingProgress).filter(
+        TrainingProgress.registration_id == registration_id
+    ).first()
+    if not progress:
+        progress = TrainingProgress(
+            registration_id=registration_id,
+            current_seconds=0,
+            max_watched_seconds=0,
+            duration_seconds=TRAINING_VIDEO_DURATION_SECONDS,
+            is_completed=False,
+            started_at=now_beijing(),
+            last_active_at=now_beijing(),
+        )
+        db.add(progress)
+        db.commit()
+        db.refresh(progress)
+    elif TRAINING_VIDEO_DURATION_SECONDS and not progress.duration_seconds:
+        progress.duration_seconds = TRAINING_VIDEO_DURATION_SECONDS
+        db.commit()
+        db.refresh(progress)
+    return progress
+
+
+def serialize_training_progress(progress: TrainingProgress | None) -> dict:
+    duration = (progress.duration_seconds if progress else 0) or TRAINING_VIDEO_DURATION_SECONDS
+    max_watched = progress.max_watched_seconds if progress else 0
+    current = progress.current_seconds if progress else 0
+    pct = round(min(100, (max_watched / duration * 100) if duration else 0), 1)
+    completed = bool(progress and progress.is_completed)
+    if completed:
+        status = "已完成"
+    elif max_watched > 0:
+        status = "学习中"
+    else:
+        status = "未开始"
+    return {
+        "current_seconds": current,
+        "max_watched_seconds": max_watched,
+        "duration_seconds": duration,
+        "progress_pct": pct,
+        "is_completed": completed,
+        "training_status": status,
+        "watched_text": f"{format_seconds(max_watched)} / {format_seconds(duration)}" if duration else format_seconds(max_watched),
+        "last_active_at": progress.last_active_at.strftime("%Y-%m-%d %H:%M") if progress and progress.last_active_at else None,
+        "completed_at": progress.completed_at.strftime("%Y-%m-%d %H:%M") if progress and progress.completed_at else None,
+    }
+
+
+def make_training_response(reg: Registration, db: Session):
+    recruit = db.query(Recruitment).filter(Recruitment.id == reg.recruitment_id).first()
+    progress = get_or_create_training_progress(reg.id, db)
+    data = serialize_training_progress(progress)
+    data.update({
+        "registration_id": reg.id,
+        "student_id": reg.student_id,
+        "name": reg.name,
+        "recruit_id": reg.recruitment_id,
+        "recruit_name": recruit.exam_name if recruit else "",
+        "video_available": Path(TRAINING_VIDEO_PATH).exists(),
+    })
+    return data
+
 # ==================== 页面路由 ====================
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):  # 新增 Request 参数，供模板使用
@@ -911,6 +1035,10 @@ async def index(request: Request):  # 新增 Request 参数，供模板使用
 @app.get("/student", response_class=HTMLResponse)
 async def student_page():
     return FileResponse("static/student.html")
+
+@app.get("/training", response_class=HTMLResponse)
+async def training_page():
+    return FileResponse("static/training.html")
 
 @app.get("/admin/login", response_class=HTMLResponse)
 async def admin_login_page():
@@ -938,6 +1066,177 @@ async def admin_logout():
     response = RedirectResponse(url="/admin/login")
     response.delete_cookie("kaowu_admin")
     return response
+
+
+@app.post("/api/training/auth")
+async def training_auth(
+    request: Request,
+    student_id: str = Form(...),
+    phone: str = Form(...),
+    registration_id: int | None = Form(None),
+    db: Session = Depends(get_db)
+):
+    rate_limit(f"training_auth_{get_client_ip(request)}", max_requests=8, window=60)
+    if not (student_id.isdigit() and len(student_id) == 8):
+        raise HTTPException(400, "学号格式错误")
+    if not (phone.isdigit() and len(phone) == 11):
+        raise HTTPException(400, "手机号格式错误")
+
+    query = db.query(Registration).filter(
+        Registration.student_id == student_id,
+        Registration.phone == phone
+    )
+    if registration_id:
+        query = query.filter(Registration.id == registration_id)
+    regs = query.order_by(Registration.create_time.desc()).all()
+    if not regs:
+        raise HTTPException(404, "未找到匹配的报名记录")
+
+    if not registration_id and len(regs) > 1:
+        recruit_ids = [r.recruitment_id for r in regs]
+        recruit_map = {
+            r.id: r.exam_name
+            for r in db.query(Recruitment).filter(Recruitment.id.in_(recruit_ids)).all()
+        }
+        return {
+            "code": 0,
+            "need_select": True,
+            "registrations": [{
+                "registration_id": r.id,
+                "recruit_name": recruit_map.get(r.recruitment_id, ""),
+                "create_time": r.create_time.strftime("%Y-%m-%d %H:%M") if r.create_time else "",
+            } for r in regs]
+        }
+
+    reg = regs[0]
+    payload = {
+        "registration_id": reg.id,
+        "student_id": reg.student_id,
+        "phone": reg.phone,
+    }
+    response = JSONResponse({"code": 0, "msg": "验证成功", "status": make_training_response(reg, db)})
+    response.set_cookie(
+        key="kaowu_training",
+        value=serializer.dumps(payload),
+        httponly=True,
+        max_age=TRAINING_COOKIE_MAX_AGE,
+        samesite="lax",
+    )
+    return response
+
+
+@app.get("/api/training/status")
+async def training_status(request: Request, db: Session = Depends(get_db)):
+    reg = get_training_cookie_registration(request, db)
+    return make_training_response(reg, db)
+
+
+@app.post("/api/training/progress")
+async def training_progress(
+    request: Request,
+    current_seconds: int = Form(...),
+    watched_seconds: int = Form(...),
+    duration_seconds: int = Form(0),
+    db: Session = Depends(get_db)
+):
+    reg = get_training_cookie_registration(request, db)
+    rate_limit(f"training_progress_{reg.id}", max_requests=20, window=60)
+
+    progress = get_or_create_training_progress(reg.id, db)
+    now = now_beijing()
+    duration = max(duration_seconds or 0, progress.duration_seconds or 0, TRAINING_VIDEO_DURATION_SECONDS)
+    if duration:
+        progress.duration_seconds = duration
+
+    current_seconds = max(0, min(int(current_seconds or 0), duration or int(current_seconds or 0)))
+    watched_seconds = max(0, min(int(watched_seconds or 0), duration or int(watched_seconds or 0)))
+
+    elapsed = (now - progress.last_active_at).total_seconds() if progress.last_active_at else 60
+    allowed_growth = max(15, int(elapsed * 3) + 10)
+    if watched_seconds > progress.max_watched_seconds:
+        proposed_growth = watched_seconds - progress.max_watched_seconds
+        if proposed_growth > allowed_growth:
+            watched_seconds = progress.max_watched_seconds + allowed_growth
+        progress.max_watched_seconds = watched_seconds
+
+    progress.current_seconds = min(current_seconds, max(progress.max_watched_seconds, current_seconds))
+    progress.last_active_at = now
+    if not progress.started_at:
+        progress.started_at = now
+
+    if duration and not progress.is_completed and progress.max_watched_seconds >= int(duration * TRAINING_COMPLETE_RATIO):
+        progress.is_completed = True
+        progress.completed_at = now
+
+    db.commit()
+    db.refresh(progress)
+    data = serialize_training_progress(progress)
+    return {"code": 0, **data}
+
+
+@app.get("/api/training/video")
+async def training_video(request: Request, db: Session = Depends(get_db)):
+    get_training_cookie_registration(request, db)
+    video_path = Path(TRAINING_VIDEO_PATH)
+    if not video_path.exists() or not video_path.is_file():
+        raise HTTPException(404, "培训视频文件不存在，请联系管理员配置")
+
+    file_size = video_path.stat().st_size
+    range_header = request.headers.get("range")
+    content_type = "video/mp4"
+
+    if not range_header:
+        def iterfile():
+            with video_path.open("rb") as f:
+                while chunk := f.read(1024 * 1024):
+                    yield chunk
+        return StreamingResponse(
+            iterfile(),
+            media_type=content_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+                "Cache-Control": "private, no-store",
+            }
+        )
+
+    try:
+        units, range_value = range_header.split("=", 1)
+        if units.strip().lower() != "bytes":
+            raise ValueError
+        start_text, end_text = range_value.split("-", 1)
+        start = int(start_text) if start_text else 0
+        end = int(end_text) if end_text else file_size - 1
+        end = min(end, file_size - 1)
+        if start < 0 or start >= file_size or end < start:
+            raise ValueError
+    except ValueError:
+        raise HTTPException(416, "Range 请求无效")
+
+    chunk_size = end - start + 1
+
+    def iter_range():
+        with video_path.open("rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                data = f.read(min(1024 * 1024, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    return StreamingResponse(
+        iter_range(),
+        status_code=206,
+        media_type=content_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(chunk_size),
+            "Cache-Control": "private, no-store",
+        }
+    )
 
 # 发布招募（不变）
 @app.post("/api/recruit/add")
@@ -1125,6 +1424,9 @@ async def delete_recruit(request: Request, recruit_id: int, db: Session = Depend
     db.query(BuildingSupervisor).filter(BuildingSupervisor.recruitment_id == recruit_id).delete(synchronize_session=False)
 
     # 先删关联的报名记录
+    reg_ids = [rid for (rid,) in db.query(Registration.id).filter(Registration.recruitment_id == recruit_id).all()]
+    if reg_ids:
+        db.query(TrainingProgress).filter(TrainingProgress.registration_id.in_(reg_ids)).delete(synchronize_session=False)
     db.query(Registration).filter(Registration.recruitment_id == recruit_id).delete(synchronize_session=False)
     # 再删招募
     db.query(Recruitment).filter(Recruitment.id == recruit_id).delete(synchronize_session=False)
@@ -1202,6 +1504,12 @@ async def view_registrations(request: Request, recruit_id: int, db: Session = De
     regs = db.query(Registration).filter(
         Registration.recruitment_id == recruit_id
     ).order_by(Registration.create_time.desc()).all()
+    progress_map = {
+        p.registration_id: p
+        for p in db.query(TrainingProgress).filter(
+            TrainingProgress.registration_id.in_([r.id for r in regs])
+        ).all()
+    } if regs else {}
     return [{
         "id": r.id,
         "student_id": r.student_id,
@@ -1211,7 +1519,8 @@ async def view_registrations(request: Request, recruit_id: int, db: Session = De
         "qq": r.qq,
         "has_experience": r.has_experience,
         "ip_address": r.ip_address,
-        "create_time": r.create_time.strftime("%Y-%m-%d %H:%M") if r.create_time else None
+        "create_time": r.create_time.strftime("%Y-%m-%d %H:%M") if r.create_time else None,
+        **serialize_training_progress(progress_map.get(r.id))
     } for r in regs]
 
 
@@ -1244,6 +1553,7 @@ async def delete_registration_by_admin(
         )
 
     db.query(VerifyCode).filter(VerifyCode.reg_id == reg.id).delete(synchronize_session=False)
+    db.query(TrainingProgress).filter(TrainingProgress.registration_id == reg.id).delete(synchronize_session=False)
     db.delete(reg)
     db.commit()
 
@@ -1302,6 +1612,7 @@ async def student_register(
         raise HTTPException(400, "报名已截止（时间到期，北京时间）")
 
     is_full = False
+    new_registration_id = None
     try:
         with db_lock(db):
             # SQLite 不支持行级锁，依赖事务内重查 + 唯一索引兜底重复报名
@@ -1321,6 +1632,8 @@ async def student_register(
                     ip_address=ip
                 )
                 db.add(reg)
+                db.flush()
+                new_registration_id = reg.id
                 if current_count + 1 >= recruit.need_num:
                     recruit.is_active = False
     except IntegrityError:
@@ -1329,7 +1642,7 @@ async def student_register(
     if is_full:
         raise HTTPException(400, "报名人数已满")
 
-    return {"code": 0, "msg": "报名成功", "qq_group": recruit.qq_group}
+    return {"code": 0, "msg": "报名成功", "qq_group": recruit.qq_group, "reg_id": new_registration_id}
 
 # 查询我的报名记录（新增可取消标识+报名ID+QQ号）
 @app.post("/api/my-registrations")
@@ -1358,6 +1671,12 @@ async def my_registrations(
 
     result = []
     now = now_beijing()
+    progress_map = {
+        p.registration_id: p
+        for p in db.query(TrainingProgress).filter(
+            TrainingProgress.registration_id.in_([reg.id for reg in regs])
+        ).all()
+    } if regs else {}
     for reg in regs:
         recruit = recruit_map.get(reg.recruitment_id)
         if recruit:
@@ -1376,7 +1695,8 @@ async def my_registrations(
                 "can_cancel": can_cancel,  # 新增可取消标识
                 "qq": reg.qq,  # 新增QQ号
                 "gender": reg.gender,
-                "qq_group": recruit.qq_group  # 考务QQ群号
+                "qq_group": recruit.qq_group,  # 考务QQ群号
+                **serialize_training_progress(progress_map.get(reg.id))
             })
     return {"code": 0, "data": result}
 
@@ -1444,6 +1764,7 @@ async def cancel_reg(
         raise HTTPException(400, "该招募已截止，无法取消报名")
 
     with db_lock(db):
+        db.query(TrainingProgress).filter(TrainingProgress.registration_id == reg.id).delete(synchronize_session=False)
         db.delete(reg)
         if not recruit.is_active:
             current_count = db.query(func.count(Registration.id)).filter(Registration.recruitment_id == recruit.id).scalar()
@@ -1464,8 +1785,15 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
     if not regs:
         raise HTTPException(400, "暂无报名数据")
 
+    progress_map = {
+        p.registration_id: p
+        for p in db.query(TrainingProgress).filter(
+            TrainingProgress.registration_id.in_([r.id for r in regs])
+        ).all()
+    }
     data = []
     for reg in regs:
+        training = serialize_training_progress(progress_map.get(reg.id))
         data.append({
             "学号": reg.student_id,
             "姓名": reg.name,
@@ -1474,7 +1802,12 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
             "QQ号": reg.qq,  # 新增QQ号导出
             "是否有经验": "有" if reg.has_experience else "无",   # ← 新增，友好显示
             "IP地址": reg.ip_address,
-            "报名时间": reg.create_time.strftime("%Y-%m-%d %H:%M")
+            "报名时间": reg.create_time.strftime("%Y-%m-%d %H:%M"),
+            "培训状态": training["training_status"],
+            "培训进度": f'{training["progress_pct"]}%',
+            "最远观看": training["watched_text"],
+            "最近学习时间": training["last_active_at"] or "",
+            "培训完成时间": training["completed_at"] or "",
         })
 
     df = pd.DataFrame(data)
@@ -1493,6 +1826,59 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
     }
 
     return StreamingResponse(output, headers=headers, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.get("/api/admin/training/overview")
+async def admin_training_overview(request: Request, recruit_id: int | None = None, db: Session = Depends(get_db)):
+    check_admin_login(request)
+    reg_query = db.query(Registration)
+    if recruit_id:
+        reg_query = reg_query.filter(Registration.recruitment_id == recruit_id)
+    regs = reg_query.order_by(Registration.create_time.desc()).all()
+
+    recruit_ids = list({r.recruitment_id for r in regs})
+    recruit_map = {
+        r.id: r.exam_name
+        for r in db.query(Recruitment).filter(Recruitment.id.in_(recruit_ids)).all()
+    } if recruit_ids else {}
+    progress_map = {
+        p.registration_id: p
+        for p in db.query(TrainingProgress).filter(
+            TrainingProgress.registration_id.in_([r.id for r in regs])
+        ).all()
+    } if regs else {}
+
+    rows = []
+    completed = learning = not_started = 0
+    for reg in regs:
+        training = serialize_training_progress(progress_map.get(reg.id))
+        if training["is_completed"]:
+            completed += 1
+        elif training["max_watched_seconds"] > 0:
+            learning += 1
+        else:
+            not_started += 1
+        rows.append({
+            "registration_id": reg.id,
+            "student_id": reg.student_id,
+            "name": reg.name,
+            "phone": reg.phone,
+            "recruit_id": reg.recruitment_id,
+            "recruit_name": recruit_map.get(reg.recruitment_id, ""),
+            **training,
+        })
+
+    total = len(rows)
+    return {
+        "summary": {
+            "total": total,
+            "completed": completed,
+            "learning": learning,
+            "not_started": not_started,
+            "completion_rate": round(completed / total * 100, 1) if total else 0,
+        },
+        "data": rows,
+    }
 
 
 @app.get("/api/recruit/{recruit_id}/grouping-result/export")

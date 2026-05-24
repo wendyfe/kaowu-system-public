@@ -224,6 +224,7 @@
                                     <th>经验</th>
                                     <th>报名时间</th>
                                     <th>IP地址</th>
+                                    <th>培训进度</th>
                                     <th>操作</th>
                                 </tr>
                             </thead>
@@ -320,6 +321,9 @@
         <ul class="nav nav-tabs" id="adminTabs" role="tablist">
             <li class="nav-item" role="presentation">
                 <button class="nav-link active" id="recruit-tab" data-bs-toggle="tab" data-bs-target="#recruit-panel" type="button">招募管理</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="training-tab" data-bs-toggle="tab" data-bs-target="#training-panel" type="button">培训进度</button>
             </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="classroom-tab" data-bs-toggle="tab" data-bs-target="#classroom-panel" type="button">教室管理</button>
@@ -422,6 +426,50 @@
             </div><!-- /.container -->
         </div><!-- /content-wrapper -->
     </div><!-- /recruit-panel -->
+
+        <!-- 培训进度 -->
+        <div class="tab-pane fade" id="training-panel" role="tabpanel">
+            <div class="container mt-4 mb-5">
+                <div class="card p-4 mb-4">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+                        <h3 class="mb-0">培训进度</h3>
+                        <div class="d-flex align-items-center gap-2">
+                            <select id="trainingRecruitFilter" class="form-select form-select-sm" style="min-width:240px;">
+                                <option value="">全部招募</option>
+                            </select>
+                            <button type="button" id="refreshTrainingBtn" class="btn btn-sm btn-outline-primary">刷新</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3 mb-4">
+                    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">总报名人数</div><div class="fs-4 fw-bold" id="trainingTotal">0</div></div></div>
+                    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">已完成培训</div><div class="fs-4 fw-bold text-success" id="trainingCompleted">0</div></div></div>
+                    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">学习中</div><div class="fs-4 fw-bold text-primary" id="trainingLearning">0</div></div></div>
+                    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">完成率</div><div class="fs-4 fw-bold" id="trainingRate">0%</div></div></div>
+                </div>
+                <div class="card p-4">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle" id="trainingTable">
+                            <thead>
+                                <tr>
+                                    <th>招募项目</th>
+                                    <th>姓名</th>
+                                    <th>学号</th>
+                                    <th>手机号</th>
+                                    <th>培训状态</th>
+                                    <th>学习进度</th>
+                                    <th>最远观看</th>
+                                    <th>最近学习</th>
+                                    <th>完成时间</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div id="trainingEmpty" class="text-center py-4 text-muted" style="display:none;">暂无报名记录</div>
+                </div>
+            </div>
+        </div>
 
         <!-- 教室管理 -->
         <div class="tab-pane fade" id="classroom-panel" role="tabpanel">
@@ -1139,6 +1187,107 @@
 
         // ========== 列表加载 ==========
 
+        function refreshTrainingRecruitFilter(list) {
+            const select = document.getElementById("trainingRecruitFilter");
+            if (!select) return;
+            const current = select.value;
+            select.textContent = "";
+            const allOpt = document.createElement("option");
+            allOpt.value = "";
+            allOpt.textContent = "全部招募";
+            select.appendChild(allOpt);
+            (list || []).forEach(item => {
+                const opt = document.createElement("option");
+                opt.value = item.id;
+                opt.textContent = item.exam_name;
+                select.appendChild(opt);
+            });
+            select.value = current;
+        }
+
+        function makeTrainingBadge(row) {
+            const badge = document.createElement("span");
+            badge.className = "badge " + (row.is_completed ? "bg-success" : row.max_watched_seconds > 0 ? "bg-primary" : "bg-secondary");
+            badge.textContent = row.training_status || "未开始";
+            return badge;
+        }
+
+        async function loadTrainingOverview() {
+            const tbody = document.querySelector("#trainingTable tbody");
+            const emptyEl = document.getElementById("trainingEmpty");
+            const filter = document.getElementById("trainingRecruitFilter");
+            if (!tbody || !emptyEl || !filter) return;
+
+            tbody.textContent = "";
+            emptyEl.style.display = "none";
+            const query = filter.value ? `?recruit_id=${encodeURIComponent(filter.value)}` : "";
+            try {
+                const res = await fetch(`/api/admin/training/overview${query}`);
+                if (!res.ok) {
+                    const data = await res.json();
+                    showToast(data.detail || "加载培训进度失败", "danger");
+                    return;
+                }
+                const result = await res.json();
+                const summary = result.summary || {};
+                document.getElementById("trainingTotal").textContent = summary.total || 0;
+                document.getElementById("trainingCompleted").textContent = summary.completed || 0;
+                document.getElementById("trainingLearning").textContent = summary.learning || 0;
+                document.getElementById("trainingRate").textContent = `${summary.completion_rate || 0}%`;
+
+                const rows = result.data || [];
+                if (rows.length === 0) {
+                    emptyEl.style.display = "block";
+                    return;
+                }
+                rows.forEach(row => {
+                    const tr = document.createElement("tr");
+                    [
+                        row.recruit_name,
+                        row.name,
+                        row.student_id,
+                        row.phone,
+                    ].forEach(value => {
+                        const td = document.createElement("td");
+                        td.textContent = value || "";
+                        tr.appendChild(td);
+                    });
+
+                    const tdStatus = document.createElement("td");
+                    tdStatus.appendChild(makeTrainingBadge(row));
+                    tr.appendChild(tdStatus);
+
+                    const tdPct = document.createElement("td");
+                    const pct = row.progress_pct || 0;
+                    const progress = document.createElement("div");
+                    progress.className = "progress";
+                    progress.style.height = "8px";
+                    progress.style.minWidth = "90px";
+                    const bar = document.createElement("div");
+                    bar.className = "progress-bar " + (row.is_completed ? "bg-success" : "bg-primary");
+                    bar.style.width = `${pct}%`;
+                    progress.appendChild(bar);
+                    const label = document.createElement("div");
+                    label.className = "small text-muted mt-1";
+                    label.textContent = `${pct}%`;
+                    tdPct.appendChild(progress);
+                    tdPct.appendChild(label);
+                    tr.appendChild(tdPct);
+
+                    [row.watched_text, row.last_active_at, row.completed_at].forEach(value => {
+                        const td = document.createElement("td");
+                        td.textContent = value || "-";
+                        if (!value) td.className = "text-muted";
+                        tr.appendChild(td);
+                    });
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error("加载培训进度失败:", err);
+                showToast("加载培训进度失败", "danger");
+            }
+        }
+
         async function loadRecruitList() {
             try {
                 const res = await fetch("/api/recruit/admin-list");
@@ -1147,6 +1296,8 @@
                     return;
                 }
                 const list = await res.json();
+                window.latestRecruitList = list;
+                refreshTrainingRecruitFilter(list);
 
                 const tbody = document.querySelector("#recruitTable tbody");
                 tbody.innerHTML = "";
@@ -1361,6 +1512,17 @@
                     tdIp.className = 'text-muted';
                     tr.appendChild(tdIp);
 
+                    const tdTraining = document.createElement("td");
+                    const badge = document.createElement("span");
+                    badge.className = "badge " + (r.is_completed ? "bg-success" : r.max_watched_seconds > 0 ? "bg-primary" : "bg-secondary");
+                    badge.textContent = `${r.training_status || '未开始'} ${r.progress_pct || 0}%`;
+                    tdTraining.appendChild(badge);
+                    const watched = document.createElement("div");
+                    watched.className = "small text-muted mt-1";
+                    watched.textContent = r.watched_text || "";
+                    tdTraining.appendChild(watched);
+                    tr.appendChild(tdTraining);
+
                     const tdAction = document.createElement("td");
                     tdAction.style.whiteSpace = 'nowrap';
                     const delBtn = document.createElement("button");
@@ -1514,6 +1676,10 @@
                 submitBtn.textContent = "发布招募";
             }
         });
+
+        document.getElementById('training-tab')?.addEventListener('shown.bs.tab', loadTrainingOverview);
+        document.getElementById('trainingRecruitFilter')?.addEventListener('change', loadTrainingOverview);
+        document.getElementById('refreshTrainingBtn')?.addEventListener('click', loadTrainingOverview);
 
         // 页面加载时获取列表
         loadRecruitList();

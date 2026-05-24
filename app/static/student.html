@@ -158,6 +158,7 @@
                         </div>
                     </div>
                     <button type="button" id="qqGroupDismissBtn" class="btn btn-custom px-5">知道了</button>
+                    <a id="trainingAfterRegLink" href="/training" class="btn btn-outline-primary px-5 ms-2">去学习培训视频</a>
                 </div>
             </div>
         </div>
@@ -231,6 +232,26 @@
         document.getElementById('qqGroupDismissBtn').addEventListener('click', function() {
             if (qqGroupModalInstance) qqGroupModalInstance.hide();
         });
+
+        async function enterTraining(regId, studentId, phone) {
+            const formData = new FormData();
+            formData.append('registration_id', regId);
+            formData.append('student_id', studentId);
+            formData.append('phone', phone);
+            try {
+                const res = await fetch('/api/training/auth', { method: 'POST', body: formData });
+                if (!res.ok) {
+                    const data = await res.json();
+                    showToast(data.detail || '培训验证失败，请到培训页重新输入', 'warning');
+                    window.location.href = '/training';
+                    return;
+                }
+                window.location.href = '/training';
+            } catch (err) {
+                showToast('网络错误，请到培训页重新输入', 'danger');
+                window.location.href = '/training';
+            }
+        }
 
         // 全局变量保存用户已选中的考试ID和表单输入值
         let selectedExamId = '';
@@ -348,9 +369,22 @@
                 if (res.ok) {
                     data = await res.json();
                     showToast(data.msg || "报名成功", 'success');
+                    const regStudentId = formData.get('student_id');
+                    const regPhone = formData.get('phone');
+                    const trainingLink = document.getElementById('trainingAfterRegLink');
+                    trainingLink.onclick = function(e) {
+                        e.preventDefault();
+                        enterTraining(data.reg_id, regStudentId, regPhone);
+                    };
 
                     if (data.qq_group) {
                         showQQGroupModal(data.qq_group);
+                    } else {
+                        setTimeout(() => {
+                            if (confirm('报名成功，是否现在学习培训视频？')) {
+                                enterTraining(data.reg_id, regStudentId, regPhone);
+                            }
+                        }, 300);
                     }
 
                     // 报名成功后清空保存的状态
@@ -504,6 +538,28 @@
                                 badge.textContent = "已截止，无法取消";
                                 li.appendChild(badge);
                             }
+
+                            const trainingWrap = document.createElement("div");
+                            trainingWrap.className = "mt-3 pt-3 border-top d-flex flex-wrap align-items-center gap-2";
+                            const trainingStatus = document.createElement("span");
+                            trainingStatus.className = "badge " + (item.is_completed ? "bg-success" : item.max_watched_seconds > 0 ? "bg-primary" : "bg-secondary");
+                            trainingStatus.textContent = `培训：${item.training_status || '未开始'} ${item.progress_pct || 0}%`;
+                            trainingWrap.appendChild(trainingStatus);
+
+                            const trainingText = document.createElement("span");
+                            trainingText.className = "text-muted small";
+                            trainingText.textContent = item.watched_text || "";
+                            trainingWrap.appendChild(trainingText);
+
+                            const trainingBtn = document.createElement("button");
+                            trainingBtn.type = "button";
+                            trainingBtn.className = "btn btn-outline-primary btn-sm ms-auto";
+                            trainingBtn.textContent = item.is_completed ? "复习培训视频" : "继续学习培训";
+                            trainingBtn.addEventListener("click", function() {
+                                enterTraining(item.reg_id, document.getElementById("myStudentId").value, document.getElementById("myPhone").value);
+                            });
+                            trainingWrap.appendChild(trainingBtn);
+                            li.appendChild(trainingWrap);
 
                             ol.appendChild(li);
                         });
