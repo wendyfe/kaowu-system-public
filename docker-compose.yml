@@ -12,8 +12,6 @@ services:
       - /data/training-videos:/data/training-videos:ro
     env_file:
       - .env
-    environment:
-      - TRAINING_VIDEO_PATH=/data/training-videos/training.mp4
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
       interval: 30s
