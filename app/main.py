@@ -98,6 +98,7 @@ TRAINING_VIDEO_PATH = os.getenv(
     "TRAINING_VIDEO_PATH",
     str(Path(__file__).resolve().parent / "protected_videos" / "training.mp4")
 )
+TRAINING_PUBLIC_VIDEO_URL = os.getenv("TRAINING_PUBLIC_VIDEO_URL", "").strip()
 TRAINING_VIDEO_DURATION_SECONDS = int(os.getenv("TRAINING_VIDEO_DURATION_SECONDS", "0") or 0)
 TRAINING_COOKIE_MAX_AGE = int(os.getenv("TRAINING_COOKIE_MAX_AGE", str(24 * 3600)))
 TRAINING_COMPLETE_RATIO = 0.95
@@ -1019,6 +1020,7 @@ def make_training_response(reg: Registration, db: Session):
         "name": reg.name,
         "recruit_id": reg.recruitment_id,
         "recruit_name": recruit.exam_name if recruit else "",
+        "video_url": TRAINING_PUBLIC_VIDEO_URL or "/api/training/video",
         "video_available": Path(TRAINING_VIDEO_PATH).exists(),
     })
     return data

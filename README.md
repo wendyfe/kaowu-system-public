@@ -67,8 +67,36 @@ docker compose up -d --build
 | `SMTP_PASS` | 邮箱密码/授权码 | — |
 | `SMTP_HOST` | SMTP 服务器 | `smtp.gmail.com` |
 | `SMTP_PORT` | SMTP 端口 | `465` |
+| `TRAINING_VIDEO_PATH` | 培训视频在容器内的文件路径 | `app/protected_videos/training.mp4` |
+| `TRAINING_PUBLIC_VIDEO_URL` | 培训页优先使用的公开视频地址，适合交给 Nginx/Cloudflare 缓存 | — |
+| `TRAINING_VIDEO_DURATION_SECONDS` | 培训视频总时长（秒），前端读取到视频时也会上报更新 | `0` |
+| `TRAINING_COOKIE_MAX_AGE` | 学生培训登录 Cookie 有效期（秒） | `86400` |
 
 > 本地开发会自动读取项目根目录或 `app/` 下的 `.env`，但不会覆盖系统环境变量；Docker 部署通过 `docker-compose.yml` 的 `env_file: .env` 传入。
+
+## 培训视频部署
+
+生产环境建议把培训视频放在宿主机 `/data/training-videos/training.mp4`，不要放进 Git 仓库或 `static/` 目录。`docker-compose.yml` 已将该目录只读挂载到容器内。
+
+`.env` 示例：
+
+```env
+TRAINING_VIDEO_PATH=/data/training-videos/training.mp4
+TRAINING_PUBLIC_VIDEO_URL=/training-public/training.mp4
+```
+
+Nginx 示例：
+
+```nginx
+location /training-public/ {
+    alias /data/training-videos/;
+    add_header Accept-Ranges bytes;
+    add_header Cache-Control "public, max-age=86400";
+    autoindex off;
+}
+```
+
+Cloudflare 橙云模式下，可为 `/training-public/*` 单独设置 Cache Rule（Cache Everything、Edge TTL 7 天或 30 天）。培训页和进度接口仍走系统身份验证，公开视频 URL 只用于提升视频加载速度。
 
 ## 工具页说明
 

@@ -176,7 +176,7 @@
             document.getElementById('trainingMeta').textContent = `${data.name}（${data.student_id}）`;
             document.getElementById('videoMissing').style.display = data.video_available ? 'none' : '';
             const video = document.getElementById('trainingVideo');
-            if (data.video_available && !video.src) video.src = '/api/training/video';
+            if (data.video_available && !video.src) video.src = data.video_url || '/api/training/video';
             setProgress(data);
             if (data.current_seconds && data.current_seconds <= maxWatched) {
                 video.currentTime = data.current_seconds;
