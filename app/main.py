@@ -1316,8 +1316,10 @@ async def training_question_answer(
         raise HTTPException(400, "请选择有效选项")
 
     progress = get_or_create_training_progress(reg.id, db)
-    if progress.max_watched_seconds + 3 < question.trigger_seconds:
-        raise HTTPException(400, "请先观看到题目对应的视频位置")
+    if progress.max_watched_seconds < question.trigger_seconds:
+        progress.max_watched_seconds = question.trigger_seconds
+    if progress.current_seconds < question.trigger_seconds:
+        progress.current_seconds = question.trigger_seconds
 
     attempt_no = (db.query(func.max(TrainingQuestionAttempt.attempt_no)).filter(
         TrainingQuestionAttempt.registration_id == reg.id,
