@@ -441,6 +441,62 @@
                         </div>
                     </div>
                 </div>
+                <div class="card p-4 mb-4">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                        <h4 class="mb-0">视频节点题</h4>
+                        <button type="button" id="resetTrainingQuestionFormBtn" class="btn btn-sm btn-outline-secondary">新增题目</button>
+                    </div>
+                    <form id="trainingQuestionForm" class="row g-3 mb-3">
+                        <input type="hidden" id="trainingQuestionId">
+                        <div class="col-md-5">
+                            <label class="form-label">题干</label>
+                            <input type="text" id="trainingQuestionPrompt" class="form-control" placeholder="例如：监考人员入场后首先应检查什么？" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">触发时间</label>
+                            <input type="text" id="trainingQuestionTrigger" class="form-control" placeholder="03:20 或 200" required>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">正确答案</label>
+                            <select id="trainingQuestionCorrect" class="form-select">
+                                <option value="0">A</option>
+                                <option value="1">B</option>
+                                <option value="2">C</option>
+                                <option value="3">D</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="trainingQuestionActive" checked>
+                                <label class="form-check-label" for="trainingQuestionActive">启用</label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">选项（每行一个）</label>
+                            <textarea id="trainingQuestionOptions" class="form-control" rows="4" placeholder="选项 A&#10;选项 B&#10;选项 C&#10;选项 D" required></textarea>
+                        </div>
+                        <div class="col-12 d-flex gap-2">
+                            <button type="submit" class="btn btn-sm btn-custom">保存题目</button>
+                            <button type="button" id="cancelTrainingQuestionEditBtn" class="btn btn-sm btn-outline-secondary" style="display:none;">取消编辑</button>
+                        </div>
+                    </form>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle" id="trainingQuestionTable">
+                            <thead>
+                                <tr>
+                                    <th>时间</th>
+                                    <th>题干</th>
+                                    <th>选项</th>
+                                    <th>答案</th>
+                                    <th>状态</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div id="trainingQuestionEmpty" class="text-center py-3 text-muted" style="display:none;">暂无题目</div>
+                </div>
                 <div class="row g-3 mb-4">
                     <div class="col-md-3"><div class="card p-3"><div class="text-muted small">总报名人数</div><div class="fs-4 fw-bold" id="trainingTotal">0</div></div></div>
                     <div class="col-md-3"><div class="card p-3"><div class="text-muted small">已完成培训</div><div class="fs-4 fw-bold text-success" id="trainingCompleted">0</div></div></div>
@@ -458,6 +514,7 @@
                                     <th>手机号</th>
                                     <th>培训状态</th>
                                     <th>学习进度</th>
+                                    <th>答题情况</th>
                                     <th>最远观看</th>
                                     <th>最近学习</th>
                                     <th>完成时间</th>
@@ -1212,6 +1269,163 @@
             return badge;
         }
 
+        function formatTrainingSeconds(value) {
+            const seconds = Math.max(0, Number(value) || 0);
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            if (h) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+            return `${m}:${String(s).padStart(2, "0")}`;
+        }
+
+        function parseTrainingSeconds(value) {
+            const text = String(value || "").trim();
+            if (/^\d+$/.test(text)) return Number(text);
+            const parts = text.split(":").map(part => Number(part));
+            if (parts.some(num => Number.isNaN(num))) return NaN;
+            if (parts.length === 2) return parts[0] * 60 + parts[1];
+            if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+            return NaN;
+        }
+
+        function resetTrainingQuestionForm() {
+            document.getElementById("trainingQuestionId").value = "";
+            document.getElementById("trainingQuestionPrompt").value = "";
+            document.getElementById("trainingQuestionTrigger").value = "";
+            document.getElementById("trainingQuestionOptions").value = "";
+            document.getElementById("trainingQuestionCorrect").value = "0";
+            document.getElementById("trainingQuestionActive").checked = true;
+            document.getElementById("cancelTrainingQuestionEditBtn").style.display = "none";
+        }
+
+        function fillTrainingQuestionForm(question) {
+            document.getElementById("trainingQuestionId").value = question.id;
+            document.getElementById("trainingQuestionPrompt").value = question.prompt || "";
+            document.getElementById("trainingQuestionTrigger").value = formatTrainingSeconds(question.trigger_seconds || 0);
+            document.getElementById("trainingQuestionOptions").value = (question.options || []).join("\n");
+            document.getElementById("trainingQuestionCorrect").value = String(question.correct_option_index || 0);
+            document.getElementById("trainingQuestionActive").checked = Boolean(question.is_active);
+            document.getElementById("cancelTrainingQuestionEditBtn").style.display = "";
+            document.getElementById("trainingQuestionPrompt").focus();
+        }
+
+        async function loadTrainingQuestions() {
+            const tbody = document.querySelector("#trainingQuestionTable tbody");
+            const emptyEl = document.getElementById("trainingQuestionEmpty");
+            if (!tbody || !emptyEl) return;
+            tbody.textContent = "";
+            emptyEl.style.display = "none";
+            try {
+                const res = await fetch("/api/admin/training/questions");
+                if (!res.ok) throw new Error("加载题目失败");
+                const questions = await res.json();
+                if (!questions.length) {
+                    emptyEl.style.display = "block";
+                    return;
+                }
+                questions.forEach(question => {
+                    const tr = document.createElement("tr");
+                    [formatTrainingSeconds(question.trigger_seconds), question.prompt, (question.options || []).join(" / ")].forEach(value => {
+                        const td = document.createElement("td");
+                        td.textContent = value || "";
+                        tr.appendChild(td);
+                    });
+
+                    const tdAnswer = document.createElement("td");
+                    tdAnswer.textContent = String.fromCharCode(65 + (question.correct_option_index || 0));
+                    tr.appendChild(tdAnswer);
+
+                    const tdStatus = document.createElement("td");
+                    const badge = document.createElement("span");
+                    badge.className = "badge " + (question.is_active ? "bg-success" : "bg-secondary");
+                    badge.textContent = question.is_active ? "启用" : "停用";
+                    tdStatus.appendChild(badge);
+                    tr.appendChild(tdStatus);
+
+                    const tdAction = document.createElement("td");
+                    tdAction.style.whiteSpace = "nowrap";
+                    const editBtn = document.createElement("button");
+                    editBtn.type = "button";
+                    editBtn.className = "btn btn-sm btn-outline-primary me-2";
+                    editBtn.textContent = "编辑";
+                    editBtn.onclick = () => fillTrainingQuestionForm(question);
+                    const delBtn = document.createElement("button");
+                    delBtn.type = "button";
+                    delBtn.className = "btn btn-sm btn-outline-danger";
+                    delBtn.textContent = "删除";
+                    delBtn.onclick = () => deleteTrainingQuestion(question.id);
+                    tdAction.appendChild(editBtn);
+                    tdAction.appendChild(delBtn);
+                    tr.appendChild(tdAction);
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error("加载培训题目失败:", err);
+                showToast("加载培训题目失败", "danger");
+            }
+        }
+
+        async function saveTrainingQuestion(event) {
+            event.preventDefault();
+            const triggerSeconds = parseTrainingSeconds(document.getElementById("trainingQuestionTrigger").value);
+            const options = document.getElementById("trainingQuestionOptions").value.split(/\n+/).map(item => item.trim()).filter(Boolean);
+            if (!Number.isFinite(triggerSeconds)) {
+                showToast("触发时间格式应为秒数或 mm:ss", "warning");
+                return;
+            }
+            if (options.length < 2) {
+                showToast("至少需要两个选项", "warning");
+                return;
+            }
+            const formData = new FormData();
+            formData.append("prompt", document.getElementById("trainingQuestionPrompt").value.trim());
+            formData.append("trigger_seconds", String(triggerSeconds));
+            formData.append("options_json", JSON.stringify(options));
+            formData.append("correct_option_index", document.getElementById("trainingQuestionCorrect").value);
+            formData.append("is_active", document.getElementById("trainingQuestionActive").checked ? "true" : "false");
+
+            const id = document.getElementById("trainingQuestionId").value;
+            try {
+                const res = await fetch(id ? `/api/admin/training/questions/${id}` : "/api/admin/training/questions", {
+                    method: id ? "PUT" : "POST",
+                    headers: { "X-CSRF-Token": getCsrf() },
+                    body: formData
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showToast(data.detail || "保存题目失败", "danger");
+                    return;
+                }
+                showToast(data.msg || "题目已保存", "success");
+                resetTrainingQuestionForm();
+                loadTrainingQuestions();
+            } catch (err) {
+                console.error("保存培训题目失败:", err);
+                showToast("保存培训题目失败", "danger");
+            }
+        }
+
+        async function deleteTrainingQuestion(questionId) {
+            if (!confirm("确定删除这道题目吗？已记录的作答也会一起删除。")) return;
+            try {
+                const res = await fetch(`/api/admin/training/questions/${questionId}`, {
+                    method: "DELETE",
+                    headers: { "X-CSRF-Token": getCsrf() }
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showToast(data.detail || "删除题目失败", "danger");
+                    return;
+                }
+                showToast(data.msg || "题目已删除", "success");
+                resetTrainingQuestionForm();
+                loadTrainingQuestions();
+            } catch (err) {
+                console.error("删除培训题目失败:", err);
+                showToast("删除培训题目失败", "danger");
+            }
+        }
+
         async function loadTrainingOverview() {
             const tbody = document.querySelector("#trainingTable tbody");
             const emptyEl = document.getElementById("trainingEmpty");
@@ -1273,6 +1487,10 @@
                     tdPct.appendChild(progress);
                     tdPct.appendChild(label);
                     tr.appendChild(tdPct);
+
+                    const tdQuestions = document.createElement("td");
+                    tdQuestions.textContent = `答对 ${row.answered_question_count || 0}，作答 ${row.question_attempts || 0}，错 ${row.wrong_attempts || 0}`;
+                    tr.appendChild(tdQuestions);
 
                     [row.watched_text, row.last_active_at, row.completed_at].forEach(value => {
                         const td = document.createElement("td");
@@ -1521,6 +1739,10 @@
                     watched.className = "small text-muted mt-1";
                     watched.textContent = r.watched_text || "";
                     tdTraining.appendChild(watched);
+                    const questions = document.createElement("div");
+                    questions.className = "small text-muted";
+                    questions.textContent = `答题：答对 ${r.answered_question_count || 0}，错 ${r.wrong_attempts || 0}`;
+                    tdTraining.appendChild(questions);
                     tr.appendChild(tdTraining);
 
                     const tdAction = document.createElement("td");
@@ -1677,9 +1899,15 @@
             }
         });
 
-        document.getElementById('training-tab')?.addEventListener('shown.bs.tab', loadTrainingOverview);
+        document.getElementById('training-tab')?.addEventListener('shown.bs.tab', () => {
+            loadTrainingOverview();
+            loadTrainingQuestions();
+        });
         document.getElementById('trainingRecruitFilter')?.addEventListener('change', loadTrainingOverview);
         document.getElementById('refreshTrainingBtn')?.addEventListener('click', loadTrainingOverview);
+        document.getElementById('trainingQuestionForm')?.addEventListener('submit', saveTrainingQuestion);
+        document.getElementById('resetTrainingQuestionFormBtn')?.addEventListener('click', resetTrainingQuestionForm);
+        document.getElementById('cancelTrainingQuestionEditBtn')?.addEventListener('click', resetTrainingQuestionForm);
 
         // 页面加载时获取列表
         loadRecruitList();

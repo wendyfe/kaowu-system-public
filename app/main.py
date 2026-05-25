@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Float, func, UniqueConstraint, text, event
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Float, Text, func, UniqueConstraint, text, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import IntegrityError
@@ -242,6 +242,31 @@ class TrainingProgress(Base):
     completed_at = Column(DateTime, nullable=True)
     __table_args__ = (UniqueConstraint('registration_id', name='uq_training_progress_registration'),)
 
+
+class TrainingQuestion(Base):
+    """培训视频节点题：简单单选题，到指定秒数暂停作答。"""
+    __tablename__ = "training_questions"
+    id = Column(Integer, primary_key=True)
+    prompt = Column(String(300), nullable=False)
+    options_json = Column(Text, nullable=False)
+    correct_option_index = Column(Integer, nullable=False, default=0)
+    trigger_seconds = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    create_time = Column(DateTime, default=now_beijing)
+
+
+class TrainingQuestionAttempt(Base):
+    """培训题作答记录：答错可重答，每次选择都记录。"""
+    __tablename__ = "training_question_attempts"
+    id = Column(Integer, primary_key=True)
+    registration_id = Column(Integer, nullable=False)
+    question_id = Column(Integer, nullable=False)
+    selected_option_index = Column(Integer, nullable=False)
+    is_correct = Column(Boolean, nullable=False, default=False)
+    attempt_no = Column(Integer, nullable=False, default=1)
+    create_time = Column(DateTime, default=now_beijing)
+
 # 新增验证码记录表（可选，替代内存存储）
 class VerifyCode(Base):
     __tablename__ = "verify_code"
@@ -450,6 +475,14 @@ try:
         conn.execute(text("""
             CREATE UNIQUE INDEX IF NOT EXISTS uq_training_progress_registration
             ON training_progress (registration_id)
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_training_questions_active_trigger
+            ON training_questions (is_active, trigger_seconds)
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_training_question_attempts_reg_question
+            ON training_question_attempts (registration_id, question_id)
         """))
         conn.commit()
 except Exception as e:
@@ -1010,10 +1043,79 @@ def serialize_training_progress(progress: TrainingProgress | None) -> dict:
     }
 
 
+def parse_training_options(options_json: str | None) -> list[str]:
+    try:
+        options = json.loads(options_json or "[]")
+    except Exception:
+        options = []
+    if not isinstance(options, list):
+        return []
+    return [str(item).strip() for item in options if str(item).strip()]
+
+
+def get_active_training_questions(db: Session) -> list[TrainingQuestion]:
+    return db.query(TrainingQuestion).filter(
+        TrainingQuestion.is_active == True
+    ).order_by(TrainingQuestion.trigger_seconds, TrainingQuestion.sort_order, TrainingQuestion.id).all()
+
+
+def get_correct_training_question_ids(registration_id: int, db: Session) -> set[int]:
+    return {
+        qid for (qid,) in db.query(TrainingQuestionAttempt.question_id).filter(
+            TrainingQuestionAttempt.registration_id == registration_id,
+            TrainingQuestionAttempt.is_correct == True
+        ).distinct().all()
+    }
+
+
+def serialize_training_question(question: TrainingQuestion, include_answer: bool = False) -> dict:
+    data = {
+        "id": question.id,
+        "prompt": question.prompt,
+        "options": parse_training_options(question.options_json),
+        "trigger_seconds": question.trigger_seconds,
+        "is_active": question.is_active,
+        "sort_order": question.sort_order,
+    }
+    if include_answer:
+        data["correct_option_index"] = question.correct_option_index
+    return data
+
+
+def get_training_question_stats(registration_ids: list[int], db: Session) -> dict[int, dict]:
+    if not registration_ids:
+        return {}
+    attempts = db.query(TrainingQuestionAttempt).filter(
+        TrainingQuestionAttempt.registration_id.in_(registration_ids)
+    ).order_by(TrainingQuestionAttempt.registration_id, TrainingQuestionAttempt.question_id, TrainingQuestionAttempt.attempt_no).all()
+
+    stats: dict[int, dict] = {}
+    for attempt in attempts:
+        row = stats.setdefault(attempt.registration_id, {
+            "question_attempts": 0,
+            "wrong_attempts": 0,
+            "answered_question_ids": set(),
+        })
+        row["question_attempts"] += 1
+        if attempt.is_correct:
+            row["answered_question_ids"].add(attempt.question_id)
+        else:
+            row["wrong_attempts"] += 1
+
+    for row in stats.values():
+        row["answered_question_count"] = len(row.pop("answered_question_ids"))
+    return stats
+
+
 def make_training_response(reg: Registration, db: Session):
     recruit = db.query(Recruitment).filter(Recruitment.id == reg.recruitment_id).first()
     progress = get_or_create_training_progress(reg.id, db)
+    questions = get_active_training_questions(db)
+    answered_ids = get_correct_training_question_ids(reg.id, db)
     data = serialize_training_progress(progress)
+    if questions and not all(q.id in answered_ids for q in questions):
+        data["is_completed"] = False
+        data["training_status"] = "学习中" if data["max_watched_seconds"] > 0 else "未开始"
     data.update({
         "registration_id": reg.id,
         "student_id": reg.student_id,
@@ -1022,6 +1124,10 @@ def make_training_response(reg: Registration, db: Session):
         "recruit_name": recruit.exam_name if recruit else "",
         "video_url": TRAINING_PUBLIC_VIDEO_URL or "/api/training/video",
         "video_available": Path(TRAINING_VIDEO_PATH).exists(),
+        "questions": [
+            {**serialize_training_question(q), "answered": q.id in answered_ids}
+            for q in questions
+        ],
     })
     return data
 
@@ -1153,6 +1259,13 @@ async def training_progress(
     current_seconds = max(0, min(int(current_seconds or 0), duration or int(current_seconds or 0)))
     watched_seconds = max(0, min(int(watched_seconds or 0), duration or int(watched_seconds or 0)))
 
+    questions = get_active_training_questions(db)
+    answered_ids = get_correct_training_question_ids(reg.id, db)
+    blocking_question = next((q for q in questions if q.id not in answered_ids and watched_seconds >= q.trigger_seconds), None)
+    if blocking_question:
+        watched_seconds = min(watched_seconds, blocking_question.trigger_seconds)
+        current_seconds = min(current_seconds, blocking_question.trigger_seconds)
+
     elapsed = (now - progress.last_active_at).total_seconds() if progress.last_active_at else 60
     allowed_growth = max(15, int(elapsed * 3) + 10)
     if watched_seconds > progress.max_watched_seconds:
@@ -1166,7 +1279,11 @@ async def training_progress(
     if not progress.started_at:
         progress.started_at = now
 
-    if duration and not progress.is_completed and progress.max_watched_seconds >= int(duration * TRAINING_COMPLETE_RATIO):
+    all_questions_done = all(q.id in answered_ids for q in questions)
+    if questions and not all_questions_done and progress.is_completed:
+        progress.is_completed = False
+        progress.completed_at = None
+    if duration and all_questions_done and not progress.is_completed and progress.max_watched_seconds >= int(duration * TRAINING_COMPLETE_RATIO):
         progress.is_completed = True
         progress.completed_at = now
 
@@ -1174,6 +1291,65 @@ async def training_progress(
     db.refresh(progress)
     data = serialize_training_progress(progress)
     return {"code": 0, **data}
+
+
+@app.post("/api/training/questions/{question_id}/answer")
+async def training_question_answer(
+    request: Request,
+    question_id: int,
+    selected_option_index: int = Form(...),
+    db: Session = Depends(get_db)
+):
+    reg = get_training_cookie_registration(request, db)
+    rate_limit(f"training_answer_{reg.id}", max_requests=30, window=60)
+
+    question = db.query(TrainingQuestion).filter(
+        TrainingQuestion.id == question_id,
+        TrainingQuestion.is_active == True
+    ).first()
+    if not question:
+        raise HTTPException(404, "题目不存在或已停用")
+
+    options = parse_training_options(question.options_json)
+    selected_option_index = int(selected_option_index)
+    if selected_option_index < 0 or selected_option_index >= len(options):
+        raise HTTPException(400, "请选择有效选项")
+
+    progress = get_or_create_training_progress(reg.id, db)
+    if progress.max_watched_seconds + 3 < question.trigger_seconds:
+        raise HTTPException(400, "请先观看到题目对应的视频位置")
+
+    attempt_no = (db.query(func.max(TrainingQuestionAttempt.attempt_no)).filter(
+        TrainingQuestionAttempt.registration_id == reg.id,
+        TrainingQuestionAttempt.question_id == question.id
+    ).scalar() or 0) + 1
+    is_correct = selected_option_index == question.correct_option_index
+    db.add(TrainingQuestionAttempt(
+        registration_id=reg.id,
+        question_id=question.id,
+        selected_option_index=selected_option_index,
+        is_correct=is_correct,
+        attempt_no=attempt_no,
+        create_time=now_beijing(),
+    ))
+
+    if is_correct:
+        questions = get_active_training_questions(db)
+        answered_ids = get_correct_training_question_ids(reg.id, db)
+        answered_ids.add(question.id)
+        duration = progress.duration_seconds or TRAINING_VIDEO_DURATION_SECONDS
+        if duration and all(q.id in answered_ids for q in questions) and progress.max_watched_seconds >= int(duration * TRAINING_COMPLETE_RATIO):
+            progress.is_completed = True
+            progress.completed_at = progress.completed_at or now_beijing()
+    progress.last_active_at = now_beijing()
+
+    db.commit()
+    return {
+        "code": 0,
+        "correct": is_correct,
+        "attempt_no": attempt_no,
+        "message": "回答正确，可以继续观看" if is_correct else "回答错误，请重新选择",
+    }
 
 
 @app.get("/api/training/video")
@@ -1429,6 +1605,7 @@ async def delete_recruit(request: Request, recruit_id: int, db: Session = Depend
     reg_ids = [rid for (rid,) in db.query(Registration.id).filter(Registration.recruitment_id == recruit_id).all()]
     if reg_ids:
         db.query(TrainingProgress).filter(TrainingProgress.registration_id.in_(reg_ids)).delete(synchronize_session=False)
+        db.query(TrainingQuestionAttempt).filter(TrainingQuestionAttempt.registration_id.in_(reg_ids)).delete(synchronize_session=False)
     db.query(Registration).filter(Registration.recruitment_id == recruit_id).delete(synchronize_session=False)
     # 再删招募
     db.query(Recruitment).filter(Recruitment.id == recruit_id).delete(synchronize_session=False)
@@ -1512,18 +1689,32 @@ async def view_registrations(request: Request, recruit_id: int, db: Session = De
             TrainingProgress.registration_id.in_([r.id for r in regs])
         ).all()
     } if regs else {}
-    return [{
-        "id": r.id,
-        "student_id": r.student_id,
-        "name": r.name,
-        "gender": r.gender,
-        "phone": r.phone,
-        "qq": r.qq,
-        "has_experience": r.has_experience,
-        "ip_address": r.ip_address,
-        "create_time": r.create_time.strftime("%Y-%m-%d %H:%M") if r.create_time else None,
-        **serialize_training_progress(progress_map.get(r.id))
-    } for r in regs]
+    question_stats = get_training_question_stats([r.id for r in regs], db)
+    active_question_count = len(get_active_training_questions(db))
+    rows = []
+    for r in regs:
+        training = serialize_training_progress(progress_map.get(r.id))
+        q_stats = question_stats.get(r.id, {})
+        if active_question_count and q_stats.get("answered_question_count", 0) < active_question_count:
+            training["is_completed"] = False
+            training["training_status"] = "学习中" if training["max_watched_seconds"] > 0 else "未开始"
+            training["completed_at"] = ""
+        rows.append({
+            "id": r.id,
+            "student_id": r.student_id,
+            "name": r.name,
+            "gender": r.gender,
+            "phone": r.phone,
+            "qq": r.qq,
+            "has_experience": r.has_experience,
+            "ip_address": r.ip_address,
+            "create_time": r.create_time.strftime("%Y-%m-%d %H:%M") if r.create_time else None,
+            "answered_question_count": q_stats.get("answered_question_count", 0),
+            "question_attempts": q_stats.get("question_attempts", 0),
+            "wrong_attempts": q_stats.get("wrong_attempts", 0),
+            **training,
+        })
+    return rows
 
 
 @app.delete("/api/recruit/{recruit_id}/registrations/{reg_id}")
@@ -1556,6 +1747,7 @@ async def delete_registration_by_admin(
 
     db.query(VerifyCode).filter(VerifyCode.reg_id == reg.id).delete(synchronize_session=False)
     db.query(TrainingProgress).filter(TrainingProgress.registration_id == reg.id).delete(synchronize_session=False)
+    db.query(TrainingQuestionAttempt).filter(TrainingQuestionAttempt.registration_id == reg.id).delete(synchronize_session=False)
     db.delete(reg)
     db.commit()
 
@@ -1679,6 +1871,8 @@ async def my_registrations(
             TrainingProgress.registration_id.in_([reg.id for reg in regs])
         ).all()
     } if regs else {}
+    question_stats = get_training_question_stats([reg.id for reg in regs], db)
+    active_question_count = len(get_active_training_questions(db))
     for reg in regs:
         recruit = recruit_map.get(reg.recruitment_id)
         if recruit:
@@ -1687,7 +1881,12 @@ async def my_registrations(
             if recruit.is_active:
                 if not recruit.end_time or now < recruit.end_time:
                     can_cancel = True
-            
+            training = serialize_training_progress(progress_map.get(reg.id))
+            if active_question_count and question_stats.get(reg.id, {}).get("answered_question_count", 0) < active_question_count:
+                training["is_completed"] = False
+                training["training_status"] = "学习中" if training["max_watched_seconds"] > 0 else "未开始"
+                training["completed_at"] = ""
+
             result.append({
                 "reg_id": reg.id,  # 新增报名ID
                 "recruit_id": recruit.id,  # 新增招募ID
@@ -1698,7 +1897,7 @@ async def my_registrations(
                 "qq": reg.qq,  # 新增QQ号
                 "gender": reg.gender,
                 "qq_group": recruit.qq_group,  # 考务QQ群号
-                **serialize_training_progress(progress_map.get(reg.id))
+                **training
             })
     return {"code": 0, "data": result}
 
@@ -1767,6 +1966,7 @@ async def cancel_reg(
 
     with db_lock(db):
         db.query(TrainingProgress).filter(TrainingProgress.registration_id == reg.id).delete(synchronize_session=False)
+        db.query(TrainingQuestionAttempt).filter(TrainingQuestionAttempt.registration_id == reg.id).delete(synchronize_session=False)
         db.delete(reg)
         if not recruit.is_active:
             current_count = db.query(func.count(Registration.id)).filter(Registration.recruitment_id == recruit.id).scalar()
@@ -1793,9 +1993,16 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
             TrainingProgress.registration_id.in_([r.id for r in regs])
         ).all()
     }
+    question_stats = get_training_question_stats([r.id for r in regs], db)
+    active_question_count = len(get_active_training_questions(db))
     data = []
     for reg in regs:
         training = serialize_training_progress(progress_map.get(reg.id))
+        q_stats = question_stats.get(reg.id, {})
+        if active_question_count and q_stats.get("answered_question_count", 0) < active_question_count:
+            training["is_completed"] = False
+            training["training_status"] = "学习中" if training["max_watched_seconds"] > 0 else "未开始"
+            training["completed_at"] = ""
         data.append({
             "学号": reg.student_id,
             "姓名": reg.name,
@@ -1810,6 +2017,9 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
             "最远观看": training["watched_text"],
             "最近学习时间": training["last_active_at"] or "",
             "培训完成时间": training["completed_at"] or "",
+            "答对题目数": q_stats.get("answered_question_count", 0),
+            "答题次数": q_stats.get("question_attempts", 0),
+            "答错次数": q_stats.get("wrong_attempts", 0),
         })
 
     df = pd.DataFrame(data)
@@ -1849,11 +2059,18 @@ async def admin_training_overview(request: Request, recruit_id: int | None = Non
             TrainingProgress.registration_id.in_([r.id for r in regs])
         ).all()
     } if regs else {}
+    question_stats = get_training_question_stats([r.id for r in regs], db)
+    active_question_count = len(get_active_training_questions(db))
 
     rows = []
     completed = learning = not_started = 0
     for reg in regs:
         training = serialize_training_progress(progress_map.get(reg.id))
+        q_stats = question_stats.get(reg.id, {})
+        if active_question_count and q_stats.get("answered_question_count", 0) < active_question_count:
+            training["is_completed"] = False
+            training["training_status"] = "学习中" if training["max_watched_seconds"] > 0 else "未开始"
+            training["completed_at"] = ""
         if training["is_completed"]:
             completed += 1
         elif training["max_watched_seconds"] > 0:
@@ -1867,6 +2084,9 @@ async def admin_training_overview(request: Request, recruit_id: int | None = Non
             "phone": reg.phone,
             "recruit_id": reg.recruitment_id,
             "recruit_name": recruit_map.get(reg.recruitment_id, ""),
+            "answered_question_count": q_stats.get("answered_question_count", 0),
+            "question_attempts": q_stats.get("question_attempts", 0),
+            "wrong_attempts": q_stats.get("wrong_attempts", 0),
             **training,
         })
 
@@ -1881,6 +2101,98 @@ async def admin_training_overview(request: Request, recruit_id: int | None = Non
         },
         "data": rows,
     }
+
+
+@app.get("/api/admin/training/questions")
+async def admin_training_questions(request: Request, db: Session = Depends(get_db)):
+    check_admin_login(request)
+    questions = db.query(TrainingQuestion).order_by(
+        TrainingQuestion.trigger_seconds, TrainingQuestion.sort_order, TrainingQuestion.id
+    ).all()
+    return [serialize_training_question(q, include_answer=True) for q in questions]
+
+
+def validate_training_question_input(prompt: str, options_json: str, correct_option_index: int, trigger_seconds: int):
+    prompt = (prompt or "").strip()
+    options = parse_training_options(options_json)
+    if not prompt:
+        raise HTTPException(400, "题干不能为空")
+    if len(options) < 2:
+        raise HTTPException(400, "至少需要两个选项")
+    if int(correct_option_index) < 0 or int(correct_option_index) >= len(options):
+        raise HTTPException(400, "正确答案序号无效")
+    if int(trigger_seconds) < 0:
+        raise HTTPException(400, "触发时间不能为负数")
+    return prompt, options
+
+
+@app.post("/api/admin/training/questions")
+async def admin_add_training_question(
+    request: Request,
+    prompt: str = Form(...),
+    options_json: str = Form(...),
+    correct_option_index: int = Form(...),
+    trigger_seconds: int = Form(...),
+    is_active: bool = Form(True),
+    db: Session = Depends(get_db)
+):
+    check_admin_login(request)
+    check_csrf(request)
+    prompt, options = validate_training_question_input(prompt, options_json, correct_option_index, trigger_seconds)
+    max_order = db.query(func.max(TrainingQuestion.sort_order)).scalar() or 0
+    question = TrainingQuestion(
+        prompt=prompt,
+        options_json=json.dumps(options, ensure_ascii=False),
+        correct_option_index=int(correct_option_index),
+        trigger_seconds=int(trigger_seconds),
+        is_active=bool(is_active),
+        sort_order=max_order + 1,
+        create_time=now_beijing(),
+    )
+    db.add(question)
+    db.commit()
+    db.refresh(question)
+    return {"code": 0, "msg": "题目已添加", "question": serialize_training_question(question, include_answer=True)}
+
+
+@app.put("/api/admin/training/questions/{question_id}")
+async def admin_update_training_question(
+    request: Request,
+    question_id: int,
+    prompt: str = Form(...),
+    options_json: str = Form(...),
+    correct_option_index: int = Form(...),
+    trigger_seconds: int = Form(...),
+    is_active: bool = Form(True),
+    db: Session = Depends(get_db)
+):
+    check_admin_login(request)
+    check_csrf(request)
+    question = db.query(TrainingQuestion).filter(TrainingQuestion.id == question_id).first()
+    if not question:
+        raise HTTPException(404, "题目不存在")
+    prompt, options = validate_training_question_input(prompt, options_json, correct_option_index, trigger_seconds)
+    question.prompt = prompt
+    question.options_json = json.dumps(options, ensure_ascii=False)
+    question.correct_option_index = int(correct_option_index)
+    question.trigger_seconds = int(trigger_seconds)
+    question.is_active = bool(is_active)
+    db.commit()
+    db.refresh(question)
+    return {"code": 0, "msg": "题目已保存", "question": serialize_training_question(question, include_answer=True)}
+
+
+@app.delete("/api/admin/training/questions/{question_id}")
+async def admin_delete_training_question(request: Request, question_id: int, db: Session = Depends(get_db)):
+    check_admin_login(request)
+    check_csrf(request)
+    question = db.query(TrainingQuestion).filter(TrainingQuestion.id == question_id).first()
+    if not question:
+        raise HTTPException(404, "题目不存在")
+    db.query(TrainingQuestionAttempt).filter(TrainingQuestionAttempt.question_id == question_id).delete(synchronize_session=False)
+    db.delete(question)
+    db.commit()
+    return {"code": 0, "msg": "题目已删除"}
 
 
 @app.get("/api/recruit/{recruit_id}/grouping-result/export")

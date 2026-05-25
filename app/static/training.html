@@ -83,6 +83,25 @@
         </div>
     </div>
 
+    <div class="modal fade" id="questionModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">培训题目</h5>
+                </div>
+                <div class="modal-body">
+                    <div class="small text-muted mb-2" id="questionTriggerText"></div>
+                    <div class="fw-bold mb-3" id="questionPrompt"></div>
+                    <div id="questionOptions" class="d-grid gap-2"></div>
+                    <div id="questionFeedback" class="alert mt-3 mb-0 py-2" style="display:none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="submitQuestionBtn" class="btn btn-custom">提交答案</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <footer>
         <div class="container">
             <p class="mb-0">© 2026 考务报名管理系统 - 所有权利保留</p>
@@ -95,6 +114,10 @@
         let maxWatched = 0;
         let lastSafeTime = 0;
         let progressTimer = null;
+        let trainingQuestions = [];
+        let activeQuestion = null;
+        let selectedOptionIndex = null;
+        let questionModal = null;
 
         function showToast(message, type) {
             const toastEl = document.getElementById('toast');
@@ -114,6 +137,9 @@
 
         function setProgress(data) {
             statusData = data;
+            if (Array.isArray(data.questions)) {
+                trainingQuestions = data.questions;
+            }
             maxWatched = Math.max(maxWatched, data.max_watched_seconds || 0);
             lastSafeTime = maxWatched;
             const duration = data.duration_seconds || document.getElementById('trainingVideo').duration || 0;
@@ -123,6 +149,94 @@
             bar.textContent = pct + '%';
             bar.className = 'progress-bar ' + (data.is_completed ? 'bg-success' : 'bg-primary');
             document.getElementById('progressText').textContent = `${data.training_status || '未开始'}，最远观看：${formatSeconds(maxWatched)}${duration ? ' / ' + formatSeconds(duration) : ''}`;
+        }
+
+        function getNextBlockingQuestion(time) {
+            return trainingQuestions
+                .filter(q => !q.answered)
+                .sort((a, b) => (a.trigger_seconds || 0) - (b.trigger_seconds || 0))
+                .find(q => time >= (q.trigger_seconds || 0));
+        }
+
+        function showQuestion(question) {
+            activeQuestion = question;
+            selectedOptionIndex = null;
+            const video = document.getElementById('trainingVideo');
+            video.pause();
+            video.currentTime = question.trigger_seconds || video.currentTime;
+            maxWatched = Math.max(maxWatched, question.trigger_seconds || 0);
+
+            document.getElementById('questionTriggerText').textContent = `视频节点：${formatSeconds(question.trigger_seconds || 0)}`;
+            document.getElementById('questionPrompt').textContent = question.prompt || '';
+            const optionsBox = document.getElementById('questionOptions');
+            optionsBox.textContent = '';
+            (question.options || []).forEach((option, index) => {
+                const id = `questionOption${index}`;
+                const wrap = document.createElement('div');
+                wrap.className = 'form-check border rounded p-3';
+                const input = document.createElement('input');
+                input.type = 'radio';
+                input.name = 'trainingQuestionOption';
+                input.id = id;
+                input.className = 'form-check-input ms-0 me-2';
+                input.addEventListener('change', () => {
+                    selectedOptionIndex = index;
+                });
+                const label = document.createElement('label');
+                label.className = 'form-check-label w-100';
+                label.htmlFor = id;
+                label.appendChild(document.createTextNode(option));
+                wrap.appendChild(input);
+                wrap.appendChild(label);
+                optionsBox.appendChild(wrap);
+            });
+            const feedback = document.getElementById('questionFeedback');
+            feedback.style.display = 'none';
+            feedback.textContent = '';
+            document.getElementById('submitQuestionBtn').disabled = false;
+            questionModal = questionModal || bootstrap.Modal.getOrCreateInstance(document.getElementById('questionModal'));
+            questionModal.show();
+        }
+
+        async function submitQuestionAnswer() {
+            if (!activeQuestion) return;
+            if (selectedOptionIndex === null) {
+                showToast('请先选择一个答案', 'warning');
+                return;
+            }
+            const btn = document.getElementById('submitQuestionBtn');
+            const feedback = document.getElementById('questionFeedback');
+            btn.disabled = true;
+            const body = new URLSearchParams();
+            body.set('selected_option_index', String(selectedOptionIndex));
+            try {
+                const res = await fetch(`/api/training/questions/${activeQuestion.id}/answer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                    body
+                });
+                const data = await res.json();
+                feedback.style.display = '';
+                feedback.className = 'alert mt-3 mb-0 py-2 ' + (data.correct ? 'alert-success' : 'alert-warning');
+                feedback.textContent = data.message || (data.correct ? '回答正确' : '回答错误，请重新选择');
+                if (!res.ok) throw new Error(data.detail || '提交失败');
+                if (data.correct) {
+                    activeQuestion.answered = true;
+                    await reportProgress(false);
+                    setTimeout(() => {
+                        questionModal.hide();
+                        activeQuestion = null;
+                        document.getElementById('trainingVideo').play().catch(() => {});
+                    }, 500);
+                } else {
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                feedback.style.display = '';
+                feedback.className = 'alert mt-3 mb-0 py-2 alert-danger';
+                feedback.textContent = err.message || '提交失败';
+                btn.disabled = false;
+            }
         }
 
         function showChoices(items) {
@@ -236,6 +350,11 @@
         });
         video.addEventListener('timeupdate', () => {
             if (!video.seeking && !video.paused) {
+                const blockingQuestion = getNextBlockingQuestion(video.currentTime);
+                if (blockingQuestion) {
+                    showQuestion(blockingQuestion);
+                    return;
+                }
                 maxWatched = Math.max(maxWatched, video.currentTime);
                 lastSafeTime = Math.max(lastSafeTime, video.currentTime);
                 setProgress({ ...statusData, max_watched_seconds: Math.floor(maxWatched), duration_seconds: Math.floor(video.duration || 0) });
@@ -249,6 +368,7 @@
         });
         video.addEventListener('ended', () => reportProgress(false));
         window.addEventListener('beforeunload', () => reportProgress(true));
+        document.getElementById('submitQuestionBtn').addEventListener('click', submitQuestionAnswer);
 
         loadStatus();
     </script>
