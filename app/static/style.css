@@ -139,6 +139,17 @@ select::placeholder {
     margin-top: 60px;
 }
 
+.training-filter-actions {
+    min-width: 0;
+}
+
+@media (min-width: 576px) {
+    #trainingRecruitFilter {
+        width: 260px;
+        max-width: 100%;
+    }
+}
+
 /* 页脚：始终在页面底部 */
 footer {
     background: #2c3e50;
