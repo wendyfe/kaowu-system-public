@@ -29,5 +29,10 @@ app/db/
 # Worktrees
 .worktrees/
 
+# Tool/runtime artifacts
+.superpowers/
+tmp_seat_label_tests/
+.claude/
+
 # Private operations docs
-docs/manual-vps-backup-restore-runbook.md
+docs/考务系统VPS备份与恢复手工操作手册.md
