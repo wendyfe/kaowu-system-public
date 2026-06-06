@@ -32,7 +32,9 @@ try:
     from tool_processors import (
         assign_invigilators,
         calculate_cet_pass_rates,
+        create_invigilator_plan,
         extract_grade_from_filename,
+        export_invigilator_final,
         generate_seat_label_precheck_report,
         generate_seat_labels_pdf,
         generate_seat_labels_pdf_v2,
@@ -46,7 +48,9 @@ except ImportError:
     from app.tool_processors import (
         assign_invigilators,
         calculate_cet_pass_rates,
+        create_invigilator_plan,
         extract_grade_from_filename,
+        export_invigilator_final,
         generate_seat_label_precheck_report,
         generate_seat_labels_pdf,
         generate_seat_labels_pdf_v2,
@@ -2321,6 +2325,9 @@ def _download_response(output: BytesIO, filename_utf8: str, filename_ascii: str,
         "Content-Disposition": f'attachment; filename="{filename_ascii}"; filename*=UTF-8\'\'{quote(filename_utf8)}',
         "Content-Type": media_type,
     }
+    invigilator_summary = getattr(output, "invigilator_summary", None)
+    if invigilator_summary is not None:
+        headers["X-Invigilator-Summary"] = quote(json.dumps(invigilator_summary, ensure_ascii=False))
     output.seek(0)
     return StreamingResponse(output, headers=headers, media_type=media_type)
 
@@ -3150,6 +3157,51 @@ async def tool_invigilator_assign(
         output,
         "监考员分配结果.xlsx",
         "invigilator_assignment.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.post("/api/tools/invigilator-plan")
+async def tool_invigilator_plan(
+    request: Request,
+    teachers_file: UploadFile = File(...),
+    rooms_file: UploadFile = File(...),
+    room_count: int = Form(...),
+):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    rate_limit(f"tool_invigilator_plan_{get_client_ip(request)}", max_requests=5, window=60)
+    _ensure_filename(teachers_file.filename, (".xlsx", ".xls"), "监考员表")
+    _ensure_filename(rooms_file.filename, (".xlsx", ".xls"), "考场表")
+    try:
+        return create_invigilator_plan(
+            await teachers_file.read(),
+            await rooms_file.read(),
+            room_count,
+        )
+    except Exception as e:
+        raise HTTPException(400, f"监考员分配失败：{str(e)}")
+
+
+@app.post("/api/tools/invigilator-export")
+async def tool_invigilator_export(request: Request):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    rate_limit(f"tool_invigilator_export_{get_client_ip(request)}", max_requests=20, window=60)
+    try:
+        payload = await request.json()
+        rows = payload.get("rows") if isinstance(payload, dict) else None
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("缺少分配结果")
+        output = export_invigilator_final(rows)
+    except Exception as e:
+        raise HTTPException(400, f"导出最终分配表失败：{str(e)}")
+    return _download_response(
+        output,
+        "监考员最终分配表.xlsx",
+        "invigilator_final_assignment.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 

@@ -98,6 +98,169 @@
         .tool-card .form-text {
             line-height: 1.6;
         }
+        .invigilator-workspace {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+            gap: 20px;
+            align-items: start;
+        }
+        .invigilator-rule-grid,
+        .invigilator-result-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .invigilator-rule,
+        .invigilator-stat,
+        .invigilator-file-row,
+        .invigilator-progress {
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+        .invigilator-rule {
+            padding: 12px;
+            min-height: 82px;
+        }
+        .invigilator-rule strong,
+        .invigilator-stat strong {
+            display: block;
+            font-size: 0.88rem;
+            color: #212529;
+        }
+        .invigilator-rule span,
+        .invigilator-stat span {
+            display: block;
+            margin-top: 4px;
+            color: #6c757d;
+            font-size: 0.82rem;
+            line-height: 1.45;
+        }
+        .invigilator-file-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 12px;
+        }
+        .invigilator-file-row + .invigilator-file-row {
+            margin-top: 8px;
+        }
+        .invigilator-file-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #495057;
+        }
+        .invigilator-progress {
+            padding: 14px;
+        }
+        .invigilator-progress-steps {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .invigilator-step {
+            border-radius: 8px;
+            padding: 9px 8px;
+            text-align: center;
+            color: #6c757d;
+            background: #fff;
+            border: 1px solid #e9ecef;
+            font-size: 0.82rem;
+        }
+        .invigilator-step.active {
+            border-color: #0d6efd;
+            color: #0d6efd;
+            background: #f1f5ff;
+        }
+        .invigilator-step.done {
+            border-color: #198754;
+            color: #198754;
+            background: #f0fff7;
+        }
+        .invigilator-stat {
+            padding: 12px;
+        }
+        .invigilator-stat strong {
+            font-size: 1.2rem;
+        }
+        .invigilator-draft-banner,
+        .invigilator-table-wrap {
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            background: #fff;
+        }
+        .invigilator-draft-banner {
+            padding: 12px;
+            background: #fff8e6;
+            border-color: #ffe7a3;
+        }
+        .invigilator-table-wrap {
+            max-height: 62vh;
+            overflow: auto;
+        }
+        .invigilator-edit-table {
+            min-width: 980px;
+            margin-bottom: 0;
+        }
+        .invigilator-slot {
+            min-height: 42px;
+            border: 1px dashed #ced4da;
+            border-radius: 8px;
+            padding: 4px;
+            background: #fff;
+        }
+        .invigilator-person {
+            border: 1px solid #dbe3ef;
+            border-radius: 8px;
+            padding: 6px 8px;
+            background: #f8fbff;
+            cursor: grab;
+            line-height: 1.25;
+        }
+        .invigilator-person:active {
+            cursor: grabbing;
+        }
+        .invigilator-person strong {
+            display: block;
+            font-size: 0.88rem;
+        }
+        .invigilator-person span {
+            display: block;
+            color: #6c757d;
+            font-size: 0.74rem;
+            margin-top: 2px;
+        }
+        .invigilator-row-warning {
+            background: #fff8e6;
+        }
+        .invigilator-row-danger {
+            background: #fff1f1;
+        }
+        .invigilator-badges {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+        .invigilator-save-status {
+            color: #6c757d;
+            font-size: 0.82rem;
+        }
+        @media (max-width: 992px) {
+            .invigilator-workspace {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 576px) {
+            .invigilator-rule-grid,
+            .invigilator-result-grid,
+            .invigilator-progress-steps {
+                grid-template-columns: 1fr;
+            }
+        }
         .tool-home-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -627,23 +790,91 @@
                         <button type="button" class="btn btn-outline-secondary btn-sm tool-back">返回工具页</button>
                     </div>
                     <div class="tool-card">
-                        <form id="toolInvigilatorForm" data-download-name="监考员分配结果.xlsx">
-                            <div class="mb-3">
-                                <label class="form-label">监考员表</label>
-                                <input type="file" class="form-control" name="teachers_file" accept=".xlsx,.xls" required>
-                                <div class="form-text">表头：id、name、gender、college <a href="/api/tools/invigilator/templates/teachers" class="ms-2">下载模板</a></div>
+                        <div class="invigilator-workspace">
+                            <form id="toolInvigilatorForm" data-download-name="监考员分配结果.xlsx">
+                                <div class="mb-3">
+                                    <label class="form-label">监考员表</label>
+                                    <input type="file" class="form-control" name="teachers_file" accept=".xlsx,.xls" required>
+                                    <div class="form-text">表头：id、name、gender、college <a href="/api/tools/invigilator/templates/teachers" class="ms-2">下载模板</a></div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">考场表</label>
+                                    <input type="file" class="form-control" name="rooms_file" accept=".xlsx,.xls" required>
+                                    <div class="form-text">表头：room_no、room_name <a href="/api/tools/invigilator/templates/rooms" class="ms-2">下载模板</a></div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">本次考试所需考场数量</label>
+                                    <input type="number" class="form-control" name="room_count" min="1" required>
+                                </div>
+                                <div class="invigilator-file-row" id="invigilatorTeacherState">
+                                    <span>监考员表</span>
+                                    <span class="invigilator-file-name">未选择</span>
+                                </div>
+                                <div class="invigilator-file-row mb-3" id="invigilatorRoomState">
+                                    <span>考场表</span>
+                                    <span class="invigilator-file-name">未选择</span>
+                                </div>
+                                <button type="submit" class="btn btn-custom" data-default-label="生成分配表">生成分配表</button>
+                            </form>
+                            <div>
+                                <div class="mb-3">
+                                    <h4>分配规则</h4>
+                                    <div class="invigilator-rule-grid">
+                                        <div class="invigilator-rule">
+                                            <strong>乙位女性</strong>
+                                            <span>每个考场乙监考必须为女性。</span>
+                                        </div>
+                                        <div class="invigilator-rule">
+                                            <strong>男性覆盖</strong>
+                                            <span>每个实体教室至少一名男性监考。</span>
+                                        </div>
+                                        <div class="invigilator-rule">
+                                            <strong>新老搭配</strong>
+                                            <span>优先拉开工号年份差，避免两年内双新晋。</span>
+                                        </div>
+                                        <div class="invigilator-rule">
+                                            <strong>学院均衡</strong>
+                                            <span>尽量避免甲乙同学院，必要时列入降级说明。</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="invigilatorProgress" class="invigilator-progress d-none mb-3">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>
+                                        <strong id="invigilatorProgressTitle">正在生成</strong>
+                                    </div>
+                                    <div class="text-muted small mt-2" id="invigilatorProgressText">正在上传文件并计算分配方案。</div>
+                                    <div class="invigilator-progress-steps">
+                                        <div class="invigilator-step active" data-step="upload">上传</div>
+                                        <div class="invigilator-step" data-step="solve">分配</div>
+                                        <div class="invigilator-step" data-step="download">下载</div>
+                                    </div>
+                                </div>
+                                <div id="invigilatorResult" class="d-none">
+                                    <h4>生成结果</h4>
+                                    <div class="invigilator-result-grid mb-3" id="invigilatorResultStats"></div>
+                                    <div class="invigilator-save-status mb-2" id="invigilatorSaveStatus"></div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <button type="button" class="btn btn-outline-primary btn-sm" id="invigilatorExportFinal">导出最终表</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="invigilatorResetInitial">恢复初稿</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="invigilatorClearResult">清空结果</button>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">考场表</label>
-                                <input type="file" class="form-control" name="rooms_file" accept=".xlsx,.xls" required>
-                                <div class="form-text">表头：room_no、room_name <a href="/api/tools/invigilator/templates/rooms" class="ms-2">下载模板</a></div>
+                        </div>
+                        <div id="invigilatorDraftBanner" class="invigilator-draft-banner d-none mt-3">
+                            <div class="d-flex flex-wrap justify-content-between gap-2 align-items-center">
+                                <div>
+                                    <strong>检测到本地草稿</strong>
+                                    <div class="small text-muted" id="invigilatorDraftText">可以恢复上次未导出的微调结果。</div>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-sm btn-warning" id="invigilatorRestoreDraft">恢复草稿</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="invigilatorDiscardDraft">丢弃</button>
+                                </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">本次考试所需考场数量</label>
-                                <input type="number" class="form-control" name="room_count" min="1" required>
-                            </div>
-                            <button type="submit" class="btn btn-custom" data-default-label="生成分配表">生成分配表</button>
-                        </form>
+                        </div>
+                        <div id="invigilatorEditor" class="invigilator-table-wrap d-none mt-3"></div>
                     </div>
                 </div>
 
@@ -2828,10 +3059,436 @@
             }
         });
 
-        document.getElementById('toolInvigilatorForm')?.addEventListener('submit', e => {
-            e.preventDefault();
-            submitToolForm(e.target, '/api/tools/invigilator-assign');
+        const INVIGILATOR_DRAFT_KEY = 'kaowu_invigilator_draft_v1';
+        let invigilatorPlan = null;
+        let invigilatorInitialRows = null;
+        let invigilatorSortables = [];
+        let invigilatorProgressTimers = [];
+
+        function setInvigilatorStep(activeStep) {
+            const order = ['upload', 'solve', 'download'];
+            const activeIndex = order.indexOf(activeStep);
+            document.querySelectorAll('#invigilatorProgress .invigilator-step').forEach(step => {
+                const idx = order.indexOf(step.dataset.step);
+                step.classList.toggle('done', idx >= 0 && idx < activeIndex);
+                step.classList.toggle('active', step.dataset.step === activeStep);
+            });
+        }
+
+        function showInvigilatorProgress(title, text, step) {
+            const panel = document.getElementById('invigilatorProgress');
+            panel?.classList.remove('d-none');
+            document.getElementById('invigilatorProgressTitle').textContent = title;
+            document.getElementById('invigilatorProgressText').textContent = text;
+            setInvigilatorStep(step);
+        }
+
+        function clearInvigilatorTimers() {
+            invigilatorProgressTimers.forEach(timer => clearTimeout(timer));
+            invigilatorProgressTimers = [];
+        }
+
+        function resetInvigilatorResult() {
+            document.getElementById('invigilatorResult')?.classList.add('d-none');
+            document.getElementById('invigilatorEditor')?.classList.add('d-none');
+            document.getElementById('invigilatorResultStats').innerHTML = '';
+            document.getElementById('invigilatorEditor').innerHTML = '';
+        }
+
+        function renderInvigilatorResult(summary) {
+            const result = document.getElementById('invigilatorResult');
+            const stats = document.getElementById('invigilatorResultStats');
+            const rows = [
+                ['考场', `${summary.room_count || 0} 个`, `实体教室 ${summary.classroom_count || 0} 间`],
+                ['监考员', `${summary.teacher_count || 0} 人`, `女 ${summary.female_count || 0} / 男 ${summary.male_count || 0}`],
+                ['双新晋', `${summary.double_new_count || 0} 组`, `两年内判定：${summary.new_teacher_threshold || ''} 年及以后`],
+                ['同学院', `${summary.same_college_count || 0} 组`, `平均工号年份差 ${summary.avg_year_gap || 0}`]
+            ];
+            stats.innerHTML = rows.map(row => `
+                <div class="invigilator-stat">
+                    <span>${escapeHtml(row[0])}</span>
+                    <strong>${escapeHtml(row[1])}</strong>
+                    <span>${escapeHtml(row[2])}</span>
+                </div>
+            `).join('');
+            result?.classList.remove('d-none');
+        }
+
+        function cloneInvigilatorRows(rows) {
+            return JSON.parse(JSON.stringify(rows || []));
+        }
+
+        function invigilatorTeacherKey(teacher) {
+            return teacher ? String(teacher.id) : '';
+        }
+
+        function invigilatorIsNewTeacher(teacher) {
+            const threshold = invigilatorPlan?.summary?.new_teacher_threshold || new Date().getFullYear() - 1;
+            return teacher?.year && teacher.year >= threshold;
+        }
+
+        function invigilatorYearGap(a, b) {
+            if (!a?.year || !b?.year) return 0;
+            return Math.abs(a.year - b.year);
+        }
+
+        function validateInvigilatorRows(rows) {
+            const hard = [];
+            const soft = [];
+            const seen = new Map();
+            const classrooms = new Map();
+            rows.forEach((row, idx) => {
+                const jia = row.jia;
+                const yi = row.yi;
+                if (yi?.gender !== '女') {
+                    hard.push(`${row['考场名称']} 的乙监考必须为女性`);
+                }
+                [jia, yi].forEach(teacher => {
+                    const key = invigilatorTeacherKey(teacher);
+                    if (!key) return;
+                    if (seen.has(key)) {
+                        hard.push(`${teacher.name} 被重复安排`);
+                    }
+                    seen.set(key, idx);
+                });
+                if (!classrooms.has(row['实体教室'])) classrooms.set(row['实体教室'], []);
+                classrooms.get(row['实体教室']).push(row);
+                if (jia?.college && yi?.college && jia.college === yi.college) {
+                    soft.push({ rowIndex: idx, type: 'sameCollege', label: '同学院' });
+                }
+                if (invigilatorIsNewTeacher(jia) && invigilatorIsNewTeacher(yi)) {
+                    soft.push({ rowIndex: idx, type: 'doubleNew', label: '双新晋' });
+                }
+            });
+            classrooms.forEach((classRows, classroom) => {
+                const hasMale = classRows.some(row => row.jia?.gender === '男' || row.yi?.gender === '男');
+                if (!hasMale) hard.push(`${classroom} 缺少男性监考`);
+            });
+            return { hard, soft };
+        }
+
+        function summarizeInvigilatorRows(rows) {
+            const validation = validateInvigilatorRows(rows);
+            const classrooms = new Set(rows.map(row => row['实体教室']));
+            const teachers = new Map();
+            let female = 0;
+            let male = 0;
+            let yearGapTotal = 0;
+            rows.forEach(row => {
+                [row.jia, row.yi].forEach(teacher => {
+                    const key = invigilatorTeacherKey(teacher);
+                    if (!key || teachers.has(key)) return;
+                    teachers.set(key, teacher);
+                    if (teacher.gender === '女') female += 1;
+                    if (teacher.gender === '男') male += 1;
+                });
+                yearGapTotal += invigilatorYearGap(row.jia, row.yi);
+            });
+            return {
+                room_count: rows.length,
+                classroom_count: classrooms.size,
+                teacher_count: teachers.size,
+                female_count: female,
+                male_count: male,
+                double_new_count: validation.soft.filter(item => item.type === 'doubleNew').length,
+                same_college_count: validation.soft.filter(item => item.type === 'sameCollege').length,
+                avg_year_gap: rows.length ? Number((yearGapTotal / rows.length).toFixed(2)) : 0,
+                new_teacher_threshold: invigilatorPlan?.summary?.new_teacher_threshold || '',
+                male_coverage_ok: !validation.hard.some(item => item.includes('缺少男性')),
+            };
+        }
+
+        function invigilatorPersonHtml(teacher) {
+            return `
+                <div class="invigilator-person" data-teacher-id="${escapeHtml(String(teacher.id))}">
+                    <strong>${escapeHtml(teacher.name)}</strong>
+                    <span>${escapeHtml(String(teacher.id))} · ${escapeHtml(teacher.gender)} · ${escapeHtml(teacher.college || '')}</span>
+                </div>
+            `;
+        }
+
+        function saveInvigilatorDraft() {
+            if (!invigilatorPlan?.rows?.length) return;
+            const draft = {
+                version: 1,
+                savedAt: new Date().toISOString(),
+                generatedAt: invigilatorPlan.generated_at,
+                rows: invigilatorPlan.rows,
+                initialRows: invigilatorInitialRows,
+                summary: invigilatorPlan.summary,
+            };
+            localStorage.setItem(INVIGILATOR_DRAFT_KEY, JSON.stringify(draft));
+            const status = document.getElementById('invigilatorSaveStatus');
+            if (status) status.textContent = `已自动保存 ${new Date().toLocaleTimeString()}`;
+        }
+
+        function clearInvigilatorDraft() {
+            localStorage.removeItem(INVIGILATOR_DRAFT_KEY);
+            document.getElementById('invigilatorDraftBanner')?.classList.add('d-none');
+        }
+
+        function checkInvigilatorDraft() {
+            const raw = localStorage.getItem(INVIGILATOR_DRAFT_KEY);
+            if (!raw) return;
+            try {
+                const draft = JSON.parse(raw);
+                if (!draft.rows?.length) return;
+                document.getElementById('invigilatorDraftBanner')?.classList.remove('d-none');
+                const savedAt = draft.savedAt ? new Date(draft.savedAt).toLocaleString() : '';
+                document.getElementById('invigilatorDraftText').textContent = savedAt ? `保存时间：${savedAt}` : '可以恢复上次未导出的微调结果。';
+            } catch (_) {
+                localStorage.removeItem(INVIGILATOR_DRAFT_KEY);
+            }
+        }
+
+        function renderInvigilatorEditor() {
+            const editor = document.getElementById('invigilatorEditor');
+            const rows = invigilatorPlan?.rows || [];
+            invigilatorSortables.forEach(sortable => sortable.destroy());
+            invigilatorSortables = [];
+            if (!rows.length) {
+                editor.classList.add('d-none');
+                editor.innerHTML = '';
+                return;
+            }
+            const validation = validateInvigilatorRows(rows);
+            const softByRow = new Map();
+            validation.soft.forEach(item => {
+                if (!softByRow.has(item.rowIndex)) softByRow.set(item.rowIndex, []);
+                softByRow.get(item.rowIndex).push(item.label);
+            });
+            editor.innerHTML = `
+                <table class="table table-sm align-middle invigilator-edit-table">
+                    <thead>
+                        <tr>
+                            <th>考场号</th>
+                            <th>考场名称</th>
+                            <th>监考员甲</th>
+                            <th>监考员乙</th>
+                            <th>年份差</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map((row, idx) => {
+                            const badges = softByRow.get(idx) || [];
+                            const rowClass = badges.includes('双新晋') ? 'invigilator-row-warning' : '';
+                            return `<tr class="${rowClass}">
+                                <td>${escapeHtml(String(row['考场号']))}</td>
+                                <td>${escapeHtml(row['考场名称'])}<div class="small text-muted">${escapeHtml(row['实体教室'])}</div></td>
+                                <td><div class="invigilator-slot" data-row-index="${idx}" data-role="jia">${invigilatorPersonHtml(row.jia)}</div></td>
+                                <td><div class="invigilator-slot" data-row-index="${idx}" data-role="yi">${invigilatorPersonHtml(row.yi)}</div></td>
+                                <td>${invigilatorYearGap(row.jia, row.yi)}</td>
+                                <td><div class="invigilator-badges">${badges.length ? badges.map(label => `<span class="badge text-bg-warning">${escapeHtml(label)}</span>`).join('') : '<span class="badge text-bg-success">通过</span>'}</div></td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            `;
+            editor.classList.remove('d-none');
+            editor.querySelectorAll('.invigilator-slot').forEach(slot => {
+                const sortable = new Sortable(slot, {
+                    group: 'invigilator-people',
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    onEnd(evt) {
+                        const from = evt.from;
+                        const to = evt.to;
+                        const fromIndex = Number(from.dataset.rowIndex);
+                        const toIndex = Number(to.dataset.rowIndex);
+                        const fromRole = from.dataset.role;
+                        const toRole = to.dataset.role;
+                        if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex) || !fromRole || !toRole || (fromIndex === toIndex && fromRole === toRole)) {
+                            renderInvigilatorEditor();
+                            return;
+                        }
+                        const previousRows = cloneInvigilatorRows(invigilatorPlan.rows);
+                        const nextRows = cloneInvigilatorRows(invigilatorPlan.rows);
+                        const moved = nextRows[fromIndex][fromRole];
+                        nextRows[fromIndex][fromRole] = nextRows[toIndex][toRole];
+                        nextRows[toIndex][toRole] = moved;
+                        const validation = validateInvigilatorRows(nextRows);
+                        if (validation.hard.length) {
+                            invigilatorPlan.rows = previousRows;
+                            renderInvigilatorEditor();
+                            showToast(validation.hard[0], 'danger');
+                            return;
+                        }
+                        invigilatorPlan.rows = nextRows;
+                        invigilatorPlan.summary = summarizeInvigilatorRows(nextRows);
+                        renderInvigilatorResult(invigilatorPlan.summary);
+                        renderInvigilatorEditor();
+                        saveInvigilatorDraft();
+                    }
+                });
+                invigilatorSortables.push(sortable);
+            });
+        }
+
+        function loadInvigilatorPlan(plan, options = {}) {
+            invigilatorPlan = plan;
+            invigilatorInitialRows = cloneInvigilatorRows(options.initialRows || plan.initialRows || plan.rows);
+            invigilatorPlan.initialRows = invigilatorInitialRows;
+            invigilatorPlan.summary = summarizeInvigilatorRows(invigilatorPlan.rows);
+            renderInvigilatorResult(invigilatorPlan.summary);
+            renderInvigilatorEditor();
+            if (!options.skipSave) saveInvigilatorDraft();
+        }
+
+        function updateInvigilatorFileState(input, stateId) {
+            const state = document.querySelector(`#${stateId} .invigilator-file-name`);
+            if (!state) return;
+            state.textContent = input.files?.[0]?.name || '未选择';
+        }
+
+        document.querySelector('#toolInvigilatorForm input[name="teachers_file"]')?.addEventListener('change', e => {
+            updateInvigilatorFileState(e.target, 'invigilatorTeacherState');
+            resetInvigilatorResult();
         });
+
+        document.querySelector('#toolInvigilatorForm input[name="rooms_file"]')?.addEventListener('change', e => {
+            updateInvigilatorFileState(e.target, 'invigilatorRoomState');
+            resetInvigilatorResult();
+        });
+
+        document.getElementById('invigilatorExportFinal')?.addEventListener('click', async () => {
+            if (!invigilatorPlan?.rows?.length) {
+                showToast('当前没有可导出的分配结果', 'warning');
+                return;
+            }
+            const validation = validateInvigilatorRows(invigilatorPlan.rows);
+            if (validation.hard.length) {
+                showToast(validation.hard[0], 'danger');
+                return;
+            }
+            try {
+                const res = await fetch('/api/tools/invigilator-export', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCsrf()
+                    },
+                    body: JSON.stringify({ rows: invigilatorPlan.rows })
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    if (res.status === 403) showToolLock();
+                    showToast(err.detail || '导出失败', 'danger');
+                    return;
+                }
+                const blob = await res.blob();
+                const filename = getFilenameFromDisposition(res.headers.get('Content-Disposition'), '监考员最终分配表.xlsx');
+                downloadBlob(blob, filename);
+                clearInvigilatorDraft();
+                showToast('最终分配表已开始下载', 'success');
+            } catch (err) {
+                showToast('导出失败，请重试', 'danger');
+            }
+        });
+
+        document.getElementById('invigilatorResetInitial')?.addEventListener('click', async () => {
+            if (!invigilatorInitialRows?.length) return;
+            const ok = await showConfirm('恢复初稿', '恢复后会覆盖当前页面上的微调结果，确定继续吗？');
+            if (!ok) return;
+            invigilatorPlan.rows = cloneInvigilatorRows(invigilatorInitialRows);
+            invigilatorPlan.summary = summarizeInvigilatorRows(invigilatorPlan.rows);
+            renderInvigilatorResult(invigilatorPlan.summary);
+            renderInvigilatorEditor();
+            saveInvigilatorDraft();
+        });
+
+        document.getElementById('invigilatorClearResult')?.addEventListener('click', () => {
+            resetInvigilatorResult();
+            document.getElementById('invigilatorProgress')?.classList.add('d-none');
+            invigilatorPlan = null;
+            invigilatorInitialRows = null;
+            clearInvigilatorDraft();
+        });
+
+        document.getElementById('invigilatorRestoreDraft')?.addEventListener('click', () => {
+            const raw = localStorage.getItem(INVIGILATOR_DRAFT_KEY);
+            if (!raw) return;
+            try {
+                const draft = JSON.parse(raw);
+                loadInvigilatorPlan({
+                    rows: draft.rows,
+                    initialRows: draft.initialRows || draft.rows,
+                    summary: draft.summary || {},
+                    generated_at: draft.generatedAt,
+                }, { initialRows: draft.initialRows || draft.rows, skipSave: true });
+                document.getElementById('invigilatorDraftBanner')?.classList.add('d-none');
+                showToast('已恢复本地草稿', 'success');
+            } catch (_) {
+                showToast('草稿读取失败', 'danger');
+            }
+        });
+
+        document.getElementById('invigilatorDiscardDraft')?.addEventListener('click', () => {
+            clearInvigilatorDraft();
+            showToast('已丢弃本地草稿', 'success');
+        });
+
+        document.getElementById('toolInvigilatorForm')?.addEventListener('submit', async e => {
+            e.preventDefault();
+            const form = e.target;
+            const button = form.querySelector('button[type="submit"]');
+            const defaultLabel = button.dataset.defaultLabel || button.textContent;
+            if (localStorage.getItem(INVIGILATOR_DRAFT_KEY)) {
+                const ok = await showConfirm('覆盖草稿', '重新生成会覆盖当前本地草稿，确定继续吗？');
+                if (!ok) return;
+            }
+            button.disabled = true;
+            button.textContent = '生成中...';
+            resetInvigilatorResult();
+            clearInvigilatorTimers();
+            showInvigilatorProgress('正在上传', '正在读取监考员表和考场表。', 'upload');
+            invigilatorProgressTimers.push(setTimeout(() => {
+                showInvigilatorProgress('正在分配', '正在满足女性乙位、实体教室男性覆盖和新老搭配规则。', 'solve');
+            }, 600));
+
+            try {
+                const res = await fetch('/api/tools/invigilator-plan', {
+                    method: 'POST',
+                    body: new FormData(form),
+                    headers: { 'X-CSRF-Token': getCsrf() }
+                });
+
+                if (!res.ok) {
+                    let message = '监考员分配失败';
+                    try {
+                        const err = await res.json();
+                        message = err.detail || message;
+                    } catch (_) {
+                        message = await res.text();
+                    }
+                    if (res.status === 403) {
+                        showToolLock();
+                    }
+                    showToast(message, 'danger');
+                    document.getElementById('invigilatorProgress')?.classList.add('d-none');
+                    return;
+                }
+
+                showInvigilatorProgress('正在整理', '分配初稿已生成，正在打开微调表。', 'download');
+                const plan = await res.json();
+                loadInvigilatorPlan(plan);
+                showInvigilatorProgress('生成完成', '可以拖拽交换甲乙监考员，完成后导出最终表。', 'download');
+                document.querySelectorAll('#invigilatorProgress .invigilator-step').forEach(step => {
+                    step.classList.add('done');
+                    step.classList.remove('active');
+                });
+                showToast('监考员分配初稿已生成', 'success');
+            } catch (err) {
+                document.getElementById('invigilatorProgress')?.classList.add('d-none');
+                showToast('监考员分配失败，请重试', 'danger');
+            } finally {
+                clearInvigilatorTimers();
+                button.disabled = false;
+                button.textContent = defaultLabel;
+            }
+        });
+
+        checkInvigilatorDraft();
 
         let seatPrecheckOk = false;
 

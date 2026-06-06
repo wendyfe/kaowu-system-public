@@ -3,6 +3,8 @@ import os
 import random
 import re
 import zipfile
+from collections import deque
+from datetime import datetime
 from io import BytesIO
 from typing import Any
 
@@ -13,8 +15,8 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 
-WEIGHT_GAP = 1.0
-WEIGHT_JIA_OLD = 1.5
+NEW_TEACHER_YEARS = 2
+INVIGILATOR_ATTEMPTS = 40
 
 GRADUATE_ID_COL = "身份证号码"
 GRADUATE_MAJOR_COL = "专业"
@@ -47,7 +49,156 @@ def get_classroom_name(room_name: str) -> str:
     return str(room_name)
 
 
-def assign_invigilators(teachers_bytes: bytes, rooms_bytes: bytes, room_count: int) -> BytesIO:
+class _MinCostMaxFlow:
+    def __init__(self, size: int):
+        self.graph = [[] for _ in range(size)]
+
+    def add_edge(self, start: int, end: int, capacity: int, cost: int):
+        forward = [end, capacity, cost, None]
+        backward = [start, 0, -cost, forward]
+        forward[3] = backward
+        self.graph[start].append(forward)
+        self.graph[end].append(backward)
+
+    def min_cost_flow(self, source: int, sink: int, required_flow: int) -> tuple[int, int]:
+        flow = 0
+        cost = 0
+        node_count = len(self.graph)
+
+        while flow < required_flow:
+            dist = [float("inf")] * node_count
+            in_queue = [False] * node_count
+            previous_node = [-1] * node_count
+            previous_edge = [None] * node_count
+            dist[source] = 0
+            queue = deque([source])
+            in_queue[source] = True
+
+            while queue:
+                current = queue.popleft()
+                in_queue[current] = False
+                for edge in self.graph[current]:
+                    end, capacity, edge_cost, _ = edge
+                    if capacity <= 0 or dist[end] <= dist[current] + edge_cost:
+                        continue
+                    dist[end] = dist[current] + edge_cost
+                    previous_node[end] = current
+                    previous_edge[end] = edge
+                    if not in_queue[end]:
+                        queue.append(end)
+                        in_queue[end] = True
+
+            if previous_node[sink] == -1:
+                break
+
+            pushed = required_flow - flow
+            node = sink
+            while node != source:
+                edge = previous_edge[node]
+                pushed = min(pushed, edge[1])
+                node = previous_node[node]
+
+            node = sink
+            while node != source:
+                edge = previous_edge[node]
+                edge[1] -= pushed
+                edge[3][1] += pushed
+                cost += pushed * edge[2]
+                node = previous_node[node]
+            flow += pushed
+
+        return flow, cost
+
+
+def _teacher_year(teacher_id: int) -> int | None:
+    match = re.match(r"^(\d{4})", str(teacher_id))
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _is_new_teacher(teacher: dict[str, Any], current_year: int) -> bool:
+    year = teacher.get("year")
+    return year is not None and year >= current_year - NEW_TEACHER_YEARS + 1
+
+
+def _experience_gap(first: dict[str, Any], second: dict[str, Any]) -> int:
+    first_year = first.get("year")
+    second_year = second.get("year")
+    if first_year is None or second_year is None:
+        return 0
+    return abs(first_year - second_year)
+
+
+def _invigilator_pair_score(jia: dict[str, Any], yi: dict[str, Any], room_index: int, room_count: int, current_year: int) -> int:
+    double_new = _is_new_teacher(jia, current_year) and _is_new_teacher(yi, current_year)
+    same_college = jia["college"] == yi["college"]
+    early_weight = room_count - room_index
+
+    score = _experience_gap(jia, yi) * 1000
+    if double_new:
+        score -= 100000 + early_weight * 100
+    if same_college:
+        score -= 5000 + early_weight * 10
+    return score
+
+
+def _format_teacher(teacher: dict[str, Any]) -> str:
+    return f"{teacher['name']}({teacher['id']},{teacher['gender']})"
+
+
+def _assign_yi_by_flow(
+    rooms: list[dict[str, Any]],
+    jia_assignments: dict[Any, dict[str, Any]],
+    yi_candidates: list[dict[str, Any]],
+    current_year: int,
+) -> tuple[dict[Any, dict[str, Any]] | None, int]:
+    room_count = len(rooms)
+    source = 0
+    female_offset = 1
+    room_offset = female_offset + len(yi_candidates)
+    sink = room_offset + room_count
+    flow = _MinCostMaxFlow(sink + 1)
+
+    for idx, _ in enumerate(yi_candidates):
+        flow.add_edge(source, female_offset + idx, 1, 0)
+
+    edge_lookup: dict[tuple[int, int], tuple[Any, dict[str, Any]]] = {}
+    for female_idx, yi in enumerate(yi_candidates):
+        for room_idx, room in enumerate(rooms):
+            room_no = room["room_no"]
+            jia = jia_assignments[room_no]
+            score = _invigilator_pair_score(jia, yi, room_idx, room_count, current_year)
+            start = female_offset + female_idx
+            end = room_offset + room_idx
+            flow.add_edge(start, end, 1, -score)
+            edge_lookup[(start, end)] = (room_no, yi)
+
+    for room_idx, _ in enumerate(rooms):
+        flow.add_edge(room_offset + room_idx, sink, 1, 0)
+
+    assigned_flow, cost = flow.min_cost_flow(source, sink, room_count)
+    if assigned_flow != room_count:
+        return None, cost
+
+    assignments: dict[Any, dict[str, Any]] = {}
+    for start in range(female_offset, female_offset + len(yi_candidates)):
+        for edge in flow.graph[start]:
+            end = edge[0]
+            if end < room_offset or end >= sink:
+                continue
+            # Original forward edges have capacity 0 after carrying one unit of flow.
+            if edge[1] == 0 and (start, end) in edge_lookup:
+                room_no, yi = edge_lookup[(start, end)]
+                assignments[room_no] = yi
+                break
+
+    if len(assignments) != room_count:
+        return None, cost
+    return assignments, cost
+
+
+def create_invigilator_plan(teachers_bytes: bytes, rooms_bytes: bytes, room_count: int) -> dict[str, Any]:
     teachers_df = pd.read_excel(BytesIO(teachers_bytes))
     rooms_df = pd.read_excel(BytesIO(rooms_bytes))
     _require_columns(teachers_df, {"id", "name", "gender", "college"}, "监考员表")
@@ -60,76 +211,291 @@ def assign_invigilators(teachers_bytes: bytes, rooms_bytes: bytes, room_count: i
 
     teachers = []
     for _, row in teachers_df.iterrows():
+        teacher_id = int(row["id"])
         teachers.append({
-            "id": int(row["id"]),
+            "id": teacher_id,
             "name": str(row["name"]).strip(),
             "gender": str(row["gender"]).strip(),
             "college": str(row["college"]).strip(),
+            "year": _teacher_year(teacher_id),
         })
 
-    teachers_sorted = sorted(teachers, key=lambda x: x["id"])
-    total = len(teachers_sorted)
-    for idx, teacher in enumerate(teachers_sorted):
-        teacher["seniority_rank"] = total - idx
-
     rooms = rooms_df.head(room_count).to_dict("records")
+    for room in rooms:
+        room["classroom"] = get_classroom_name(room["room_name"])
+
     female_teachers = [t for t in teachers if t["gender"] == "女"]
+    male_teachers = [t for t in teachers if t["gender"] == "男"]
+    classrooms: dict[str, list[dict[str, Any]]] = {}
+    for room in rooms:
+        classrooms.setdefault(room["classroom"], []).append(room)
+
     if len(female_teachers) < len(rooms):
         raise ValueError("女性监考人数不足，无法满足所有考场乙位要求")
     if len(teachers) < len(rooms) * 2:
         raise ValueError("监考员总人数不足，无法满足每个考场两名监考员要求")
+    if len(male_teachers) < len(classrooms):
+        raise ValueError(f"男性监考人数不足，无法满足每个实体教室至少一名男性要求（需 {len(classrooms)} 人，现有 {len(male_teachers)} 人）")
 
-    random.shuffle(female_teachers)
-    yi_assignments = {}
-    used_teacher_ids = set()
-    for room, yi in zip(rooms, female_teachers):
-        yi_assignments[room["room_no"]] = yi
-        used_teacher_ids.add(yi["id"])
+    current_year = datetime.now().year
+    jia_count = len(rooms)
+    male_jia_count = min(len(male_teachers), jia_count)
+    female_jia_count = jia_count - male_jia_count
+    if len(female_teachers) - female_jia_count < len(rooms):
+        raise ValueError("女性监考人数不足，无法同时满足乙位女性和甲位人员数量要求")
 
-    classroom_has_male = {get_classroom_name(r["room_name"]): False for r in rooms}
-    remaining_teachers = [t for t in teachers if t["id"] not in used_teacher_ids]
-    arrangements = []
-    failures = []
+    coverage_slots = [classroom_rooms[0]["room_no"] for classroom_rooms in classrooms.values()]
+    coverage_slot_set = set(coverage_slots)
+    flexible_slots = [room["room_no"] for room in rooms if room["room_no"] not in coverage_slot_set]
+    if female_jia_count > len(flexible_slots):
+        raise ValueError("男性监考人数不足，无法在所有实体教室完成男性覆盖")
 
-    for room in rooms:
-        room_no = room["room_no"]
-        room_name = room["room_name"]
-        classroom = get_classroom_name(room_name)
-        yi = yi_assignments[room_no]
+    best_result: dict[str, Any] | None = None
+    for attempt in range(INVIGILATOR_ATTEMPTS):
+        male_pool = male_teachers[:]
+        female_pool = female_teachers[:]
+        random.shuffle(male_pool)
+        random.shuffle(female_pool)
 
-        best_jia = None
-        best_score = -1
-        for candidate in remaining_teachers:
-            if candidate["college"] == yi["college"]:
-                continue
-            if not classroom_has_male[classroom] and candidate["gender"] != "男":
-                continue
-            gap = abs(candidate["id"] - yi["id"])
-            score = WEIGHT_GAP * gap + WEIGHT_JIA_OLD * candidate["seniority_rank"]
-            if score > best_score:
-                best_score = score
-                best_jia = candidate
-
-        if best_jia is None:
-            failures.append(str(room_name))
+        selected_female_jia = female_pool[:female_jia_count]
+        yi_candidates = female_pool[female_jia_count:]
+        selected_male_jia = male_pool[:male_jia_count]
+        if len(yi_candidates) < len(rooms):
             continue
 
-        remaining_teachers.remove(best_jia)
-        if best_jia["gender"] == "男":
-            classroom_has_male[classroom] = True
+        jia_assignments: dict[Any, dict[str, Any]] = {}
+        random.shuffle(coverage_slots)
+        random.shuffle(flexible_slots)
 
-        arrangements.append({
+        male_cursor = 0
+        for room_no in coverage_slots:
+            jia_assignments[room_no] = selected_male_jia[male_cursor]
+            male_cursor += 1
+
+        remaining_jia = selected_male_jia[male_cursor:] + selected_female_jia
+        random.shuffle(remaining_jia)
+        for room_no, teacher in zip(flexible_slots, remaining_jia):
+            jia_assignments[room_no] = teacher
+
+        if len(jia_assignments) != len(rooms):
+            continue
+
+        yi_assignments, flow_cost = _assign_yi_by_flow(rooms, jia_assignments, yi_candidates, current_year)
+        if yi_assignments is None:
+            continue
+
+        violations = []
+        score = -flow_cost
+        for idx, room in enumerate(rooms):
+            room_no = room["room_no"]
+            jia = jia_assignments[room_no]
+            yi = yi_assignments[room_no]
+            if _is_new_teacher(jia, current_year) and _is_new_teacher(yi, current_year):
+                violations.append({
+                    "考场号": room_no,
+                    "考场名称": room["room_name"],
+                    "违规/降级类型": "双新晋搭配",
+                    "说明": "甲乙均为两年内新晋教职工",
+                    "监考员甲": _format_teacher(jia),
+                    "监考员乙": _format_teacher(yi),
+                })
+            if jia["college"] == yi["college"]:
+                violations.append({
+                    "考场号": room_no,
+                    "考场名称": room["room_name"],
+                    "违规/降级类型": "甲乙同学院",
+                    "说明": "为满足更高优先级约束，放宽学院均衡偏好",
+                    "监考员甲": _format_teacher(jia),
+                    "监考员乙": _format_teacher(yi),
+                })
+
+        candidate = {
+            "score": score,
+            "jia_assignments": jia_assignments,
+            "yi_assignments": yi_assignments,
+            "violations": violations,
+        }
+        if best_result is None:
+            best_result = candidate
+            continue
+        current_double_new = sum(1 for item in violations if item["违规/降级类型"] == "双新晋搭配")
+        best_double_new = sum(1 for item in best_result["violations"] if item["违规/降级类型"] == "双新晋搭配")
+        current_same_college = sum(1 for item in violations if item["违规/降级类型"] == "甲乙同学院")
+        best_same_college = sum(1 for item in best_result["violations"] if item["违规/降级类型"] == "甲乙同学院")
+        if (
+            current_double_new,
+            current_same_college,
+            -score,
+        ) < (
+            best_double_new,
+            best_same_college,
+            -best_result["score"],
+        ):
+            best_result = candidate
+
+    if best_result is None:
+        raise ValueError("无法在当前硬约束下生成完整分配，请检查女性人数、男性人数和考场数量")
+
+    rows = []
+    male_covered_classrooms = set()
+    year_gaps = []
+    same_college_count = 0
+    double_new_count = 0
+    for room in rooms:
+        room_no = room["room_no"]
+        jia = best_result["jia_assignments"][room_no]
+        yi = best_result["yi_assignments"][room_no]
+        if jia["gender"] == "男":
+            male_covered_classrooms.add(room["classroom"])
+        year_gap = _experience_gap(jia, yi)
+        year_gaps.append(year_gap)
+        same_college = jia["college"] == yi["college"]
+        double_new = _is_new_teacher(jia, current_year) and _is_new_teacher(yi, current_year)
+        same_college_count += int(same_college)
+        double_new_count += int(double_new)
+        rows.append({
             "考场号": room_no,
-            "考场名称": room_name,
-            "监考员甲": f"{best_jia['name']}({best_jia['id']},{best_jia['gender']})",
-            "监考员乙": f"{yi['name']}({yi['id']},{yi['gender']})",
+            "考场名称": room["room_name"],
+            "实体教室": room["classroom"],
+            "jia": {
+                "id": jia["id"],
+                "name": jia["name"],
+                "gender": jia["gender"],
+                "college": jia["college"],
+                "year": jia.get("year"),
+            },
+            "yi": {
+                "id": yi["id"],
+                "name": yi["name"],
+                "gender": yi["gender"],
+                "college": yi["college"],
+                "year": yi.get("year"),
+            },
+            "工号年份差": year_gap,
+            "是否双新晋": "是" if double_new else "否",
+            "是否同学院": "是" if same_college else "否",
         })
 
-    if failures:
-        raise ValueError(f"以下考场无法完成分配：{', '.join(failures)}")
+    missing_male_coverage = sorted(set(classrooms) - male_covered_classrooms)
+    violations = best_result["violations"][:]
+    for classroom in missing_male_coverage:
+        violations.append({
+            "考场号": "",
+            "考场名称": classroom,
+            "违规/降级类型": "实体教室缺少男性",
+            "说明": "硬约束未满足，请人工调整",
+            "监考员甲": "",
+            "监考员乙": "",
+        })
+
+    summary = {
+        "room_count": len(rooms),
+        "classroom_count": len(classrooms),
+        "teacher_count": len(teachers),
+        "female_count": len(female_teachers),
+        "male_count": len(male_teachers),
+        "double_new_count": double_new_count,
+        "same_college_count": same_college_count,
+        "avg_year_gap": round(sum(year_gaps) / len(year_gaps), 2) if year_gaps else 0,
+        "new_teacher_threshold": current_year - NEW_TEACHER_YEARS + 1,
+        "male_coverage_ok": not missing_male_coverage,
+    }
+    return {
+        "rows": rows,
+        "summary": summary,
+        "violations": violations,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def _invigilator_plan_to_detailed_workbook(plan: dict[str, Any]) -> BytesIO:
+    rows = plan.get("rows") or []
+    summary = plan.get("summary") or {}
+    arrangements = []
+    for row in rows:
+        jia = row["jia"]
+        yi = row["yi"]
+        arrangements.append({
+            "考场号": row["考场号"],
+            "考场名称": row["考场名称"],
+            "实体教室": row["实体教室"],
+            "监考员甲": _format_teacher(jia),
+            "甲学院": jia["college"],
+            "甲入职年份": jia.get("year") or "",
+            "监考员乙": _format_teacher(yi),
+            "乙学院": yi["college"],
+            "乙入职年份": yi.get("year") or "",
+            "工号年份差": row.get("工号年份差", ""),
+            "是否双新晋": row.get("是否双新晋", ""),
+            "是否同学院": row.get("是否同学院", ""),
+        })
+
+    summary_rows = [
+        {"项目": "考场数", "值": summary.get("room_count", 0)},
+        {"项目": "实体教室数", "值": summary.get("classroom_count", 0)},
+        {"项目": "监考员总数", "值": summary.get("teacher_count", 0)},
+        {"项目": "女性监考员数", "值": summary.get("female_count", 0)},
+        {"项目": "男性监考员数", "值": summary.get("male_count", 0)},
+        {"项目": "乙位女性硬约束", "值": "已满足"},
+        {"项目": "每名老师只出现一次", "值": "已满足"},
+        {"项目": "实体教室男性覆盖", "值": "已满足" if summary.get("male_coverage_ok") else "未满足"},
+        {"项目": "双新晋搭配数", "值": summary.get("double_new_count", 0)},
+        {"项目": "甲乙同学院数", "值": summary.get("same_college_count", 0)},
+        {"项目": "平均工号年份差", "值": summary.get("avg_year_gap", 0)},
+        {"项目": "两年内新晋判定", "值": f"{summary.get('new_teacher_threshold', '')} 年及以后"},
+    ]
 
     output = BytesIO()
-    pd.DataFrame(arrangements).to_excel(output, index=False)
+    output.invigilator_summary = summary
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        pd.DataFrame(arrangements).to_excel(writer, index=False, sheet_name="分配结果")
+        violations_df = pd.DataFrame(plan.get("violations") or [{
+            "考场号": "",
+            "考场名称": "",
+            "违规/降级类型": "无",
+            "说明": "所有软约束均已满足",
+            "监考员甲": "",
+            "监考员乙": "",
+        }])
+        violations_df.to_excel(writer, index=False, sheet_name="违规降级说明")
+        pd.DataFrame(summary_rows).to_excel(writer, index=False, sheet_name="统计摘要")
+    output.seek(0)
+    return output
+
+
+def assign_invigilators(teachers_bytes: bytes, rooms_bytes: bytes, room_count: int) -> BytesIO:
+    return _invigilator_plan_to_detailed_workbook(
+        create_invigilator_plan(teachers_bytes, rooms_bytes, room_count)
+    )
+
+
+def _teacher_export_name(teacher: dict[str, Any], duplicate_names: set[str]) -> str:
+    name = str(teacher.get("name") or "").strip()
+    if name in duplicate_names:
+        return f"{name}({teacher.get('id')})"
+    return name
+
+
+def export_invigilator_final(rows: list[dict[str, Any]]) -> BytesIO:
+    name_counts: dict[str, int] = {}
+    for row in rows:
+        for role in ("jia", "yi"):
+            name = str((row.get(role) or {}).get("name") or "").strip()
+            if name:
+                name_counts[name] = name_counts.get(name, 0) + 1
+    duplicate_names = {name for name, count in name_counts.items() if count > 1}
+
+    export_rows = []
+    for row in rows:
+        export_rows.append({
+            "考场号": row.get("考场号"),
+            "考场名称": row.get("考场名称"),
+            "监考员甲": _teacher_export_name(row.get("jia") or {}, duplicate_names),
+            "监考员乙": _teacher_export_name(row.get("yi") or {}, duplicate_names),
+        })
+
+    output = BytesIO()
+    pd.DataFrame(export_rows).to_excel(output, index=False)
     output.seek(0)
     return output
 
