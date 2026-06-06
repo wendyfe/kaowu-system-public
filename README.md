@@ -77,7 +77,7 @@ docker compose up -d --build
 | `TRAINING_COOKIE_MAX_AGE` | 学生培训登录 Cookie 有效期（秒） | `86400` |
 | `BACKUP_ENABLED` | 是否启用工具页手动备份 | `false` |
 | `BACKUP_REPO_DIR` | 容器内 GitHub 备份仓库路径 | `/backup-repo` |
-| `BACKUP_REPO_HOST_DIR` | 宿主机备份仓库路径，用于 Compose 挂载 | `/opt/kaowu-backups` |
+| `BACKUP_REPO_HOST_DIR` | 宿主机备份仓库路径，用于 Compose 挂载 | — |
 | `BACKUP_SUBDIR` | 备份仓库内的子目录 | `kaowu-system` |
 | `BACKUP_GIT_BRANCH` | 备份推送分支 | `main` |
 | `BACKUP_GIT_REMOTE` | 备份仓库远端地址，配置后会自动设置 origin | — |
@@ -127,42 +127,6 @@ Cloudflare 橙云模式下，可为 `/training-public/*` 单独设置 Cache Rule
 - **数据备份**：对当前 SQLite 数据库生成一致性快照，加密后提交并推送到 GitHub 备份仓库。
 
 涉及个人信息和成绩数据的工具仅供内部授权人员使用，不建议在公开文档中记录具体数据解析规则或业务口径细节。
-
-## 数据备份与灾备恢复
-
-当前备份逻辑已经纳入项目容器：管理员在工具页点击“数据备份”后，后端会对 SQLite 数据库生成一致性快照，完成完整性检查后压缩、GPG 加密、提交并推送到 GitHub 备份仓库。
-
-生产环境当前使用对称加密，VPS 上的口令文件通过 Compose 只读挂载进容器。口令文件不要提交到代码仓库。
-
-关键路径：
-
-| 项目 | 路径 |
-|---|---|
-| VPS 数据库 | `/opt/kaowu-system-public/app/db/kaowu.db` |
-| VPS 备份仓库 | `/opt/kaowu-backups` |
-| VPS 备份口令文件 | `/home/ubuntu/.kaowu-backup-passphrase` |
-| 本地备份口令文件 | `/Users/wff/KAIfa/kaowu-system-local-secrets/kaowu-backup-passphrase` |
-| GitHub 备份仓库 | `wendyfe/kaowu-backups` |
-| 备份文件目录 | `kaowu-system/` |
-
-如果 VPS 损坏或无法访问，只要还能访问 GitHub 备份仓库，并且本地保存了上述口令文件，就可以解密出 `kaowu.db`：
-
-```bash
-gpg --batch --pinentry-mode loopback \
-  --passphrase-file /Users/wff/KAIfa/kaowu-system-local-secrets/kaowu-backup-passphrase \
-  --decrypt kaowu-YYYYMMDD-HHMMSS.db.gz.gpg \
-  | gunzip > kaowu.db
-```
-
-恢复到新服务器时，将解密得到的 `kaowu.db` 放回新项目的 `app/db/kaowu.db`，再启动或重建容器。备份只包含 SQLite 数据库，不包含 `.env`、培训视频、SSH 私钥、GPG 口令文件和 1Panel 配置。
-
-## 最近改动
-
-- 将数据备份从宿主机 crontab 迁移到项目容器内，由管理端工具页手动触发。
-- 新增工具页“数据备份”入口，备份前需管理员登录并通过工具页 PIN。
-- 新增备份接口：`GET /api/tools/backup/status`、`POST /api/tools/backup`。
-- 容器内新增 Git/GPG/SSH 依赖，并通过 `.env` 和只读挂载管理备份仓库、GPG 口令文件、GitHub SSH 私钥。
-- VPS 上旧的宿主机定时备份 cron 已删除；后续备份由项目工具页触发。
 
 ## 注意事项
 
