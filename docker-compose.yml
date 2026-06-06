@@ -8,6 +8,9 @@ services:
     volumes:
       - ./app/db:/app/db
       - /data/training-videos:/data/training-videos:ro
+      - ${BACKUP_REPO_HOST_DIR:-/opt/kaowu-backups}:${BACKUP_REPO_DIR:-/backup-repo}
+      - ${BACKUP_GPG_PASSPHRASE_FILE_HOST:-/home/ubuntu/.kaowu-backup-passphrase}:${BACKUP_GPG_PASSPHRASE_FILE:-/run/secrets/kaowu_backup_passphrase}:ro
+      - ${BACKUP_SSH_KEY_HOST_PATH:-/home/ubuntu/.ssh/kaowu_backup_github}:${BACKUP_SSH_KEY_PATH:-/run/secrets/kaowu_backup_github}:ro
     env_file:
       - .env
     healthcheck:

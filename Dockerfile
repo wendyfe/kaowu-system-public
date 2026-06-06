@@ -1,5 +1,12 @@
 FROM python:3.10-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    git \
+    gnupg \
+    openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # 1. 先复制 requirements.txt 到容器（注意路径：项目根目录的requirements.txt）

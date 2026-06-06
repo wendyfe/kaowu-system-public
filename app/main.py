@@ -26,6 +26,10 @@ import string
 import time
 import json
 import tempfile
+import gzip
+import shutil
+import sqlite3
+import subprocess
 from pathlib import Path
 from openpyxl.styles import Alignment, Font
 try:
@@ -2318,6 +2322,256 @@ async def tools_unlock(request: Request, pin: str = Form(...)):
         samesite="lax",
     )
     return json_response
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)) or default)
+    except ValueError:
+        return default
+
+
+def _backup_config() -> dict:
+    return {
+        "enabled": _env_bool("BACKUP_ENABLED", False),
+        "repo_dir": Path(os.getenv("BACKUP_REPO_DIR", "/backup-repo")),
+        "subdir": os.getenv("BACKUP_SUBDIR", "kaowu-system").strip() or "kaowu-system",
+        "branch": os.getenv("BACKUP_GIT_BRANCH", "main").strip() or "main",
+        "keep_local": _env_int("BACKUP_KEEP_LOCAL", 10),
+        "git_remote": os.getenv("BACKUP_GIT_REMOTE", "").strip(),
+        "ssh_key_path": os.getenv("BACKUP_SSH_KEY_PATH", "").strip(),
+        "gpg_recipient": os.getenv("BACKUP_GPG_RECIPIENT", "").strip(),
+        "gpg_passphrase": os.getenv("BACKUP_GPG_PASSPHRASE", ""),
+        "gpg_passphrase_file": os.getenv("BACKUP_GPG_PASSPHRASE_FILE", "").strip(),
+    }
+
+
+def _backup_git_env(config: dict) -> dict:
+    env = os.environ.copy()
+    ssh_key_path = config["ssh_key_path"]
+    if ssh_key_path:
+        env["GIT_SSH_COMMAND"] = (
+            f"ssh -i {shlex_quote(ssh_key_path)} "
+            "-o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "
+            "-o UserKnownHostsFile=/tmp/kaowu_backup_known_hosts"
+        )
+    return env
+
+
+def shlex_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def _run_backup_command(
+    args: list[str],
+    config: dict,
+    *,
+    input_text: str | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            args,
+            input=input_text,
+            text=True,
+            capture_output=True,
+            timeout=120,
+            env=_backup_git_env(config),
+            check=check,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(500, f"备份依赖缺失：{args[0]}") from exc
+    except subprocess.CalledProcessError as exc:
+        output = (exc.stderr or exc.stdout or "").strip()
+        raise HTTPException(500, output[-500:] or f"备份命令执行失败：{args[0]}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(500, f"备份命令超时：{args[0]}") from exc
+
+
+def _git_command(config: dict, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    repo_dir = str(config["repo_dir"])
+    command = ["git", "-C", repo_dir, "-c", f"safe.directory={repo_dir}", *args]
+    return _run_backup_command(command, config, check=check)
+
+
+def _validate_backup_config(config: dict):
+    if not config["enabled"]:
+        raise HTTPException(400, "数据备份未启用，请设置 BACKUP_ENABLED=true")
+    if not Path(DB_PATH).exists():
+        raise HTTPException(500, f"数据库文件不存在：{DB_PATH}")
+    repo_dir = config["repo_dir"]
+    if not (repo_dir / ".git").exists():
+        raise HTTPException(500, f"备份仓库不存在或未挂载：{repo_dir}")
+    if not config["gpg_recipient"] and not config["gpg_passphrase"] and not config["gpg_passphrase_file"]:
+        raise HTTPException(500, "请配置 BACKUP_GPG_RECIPIENT、BACKUP_GPG_PASSPHRASE 或 BACKUP_GPG_PASSPHRASE_FILE")
+    if config["gpg_passphrase_file"] and not Path(config["gpg_passphrase_file"]).exists():
+        raise HTTPException(500, f"GPG 口令文件未挂载：{config['gpg_passphrase_file']}")
+    if config["ssh_key_path"] and not Path(config["ssh_key_path"]).exists():
+        raise HTTPException(500, f"GitHub SSH 私钥未挂载：{config['ssh_key_path']}")
+
+
+def _backup_files(config: dict) -> list[Path]:
+    dest_dir = config["repo_dir"] / config["subdir"]
+    if not dest_dir.exists():
+        return []
+    return sorted(dest_dir.glob("kaowu-*.db.gz.gpg"))
+
+
+def _backup_status_payload() -> dict:
+    config = _backup_config()
+    backups = _backup_files(config)
+    latest = backups[-1] if backups else None
+    configured = (
+        config["enabled"]
+        and (config["repo_dir"] / ".git").exists()
+        and bool(config["gpg_recipient"] or config["gpg_passphrase"] or config["gpg_passphrase_file"])
+    )
+    return {
+        "enabled": config["enabled"],
+        "configured": configured,
+        "repo_dir": str(config["repo_dir"]),
+        "subdir": config["subdir"],
+        "branch": config["branch"],
+        "keep_local": config["keep_local"],
+        "backup_count": len(backups),
+        "latest_backup": latest.name if latest else None,
+        "latest_backup_size": latest.stat().st_size if latest else None,
+        "latest_backup_mtime": datetime.fromtimestamp(latest.stat().st_mtime).isoformat(timespec="seconds") if latest else None,
+    }
+
+
+def _encrypt_backup(config: dict, archive: Path, encrypted: Path):
+    if config["gpg_recipient"]:
+        _run_backup_command(
+            [
+                "gpg",
+                "--batch",
+                "--yes",
+                "--trust-model",
+                "always",
+                "--encrypt",
+                "--recipient",
+                config["gpg_recipient"],
+                "--output",
+                str(encrypted),
+                str(archive),
+            ],
+            config,
+        )
+        return
+
+    command = [
+        "gpg",
+        "--batch",
+        "--yes",
+        "--pinentry-mode",
+        "loopback",
+        "--symmetric",
+        "--cipher-algo",
+        "AES256",
+        "--output",
+        str(encrypted),
+        str(archive),
+    ]
+    if config["gpg_passphrase_file"]:
+        command.extend(["--passphrase-file", config["gpg_passphrase_file"]])
+        _run_backup_command(command, config)
+    else:
+        command.extend(["--passphrase-fd", "0"])
+        _run_backup_command(command, config, input_text=config["gpg_passphrase"])
+
+
+def _run_database_backup() -> dict:
+    config = _backup_config()
+    _validate_backup_config(config)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest_dir = config["repo_dir"] / config["subdir"]
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="kaowu_backup_") as tmp:
+        tmpdir = Path(tmp)
+        backup_db = tmpdir / f"kaowu-{timestamp}.db"
+        archive = tmpdir / f"kaowu-{timestamp}.db.gz"
+        encrypted = tmpdir / f"kaowu-{timestamp}.db.gz.gpg"
+        dest_file = dest_dir / encrypted.name
+
+        source = sqlite3.connect(DB_PATH)
+        target = sqlite3.connect(backup_db)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+            source.close()
+
+        with sqlite3.connect(backup_db) as conn:
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise HTTPException(500, f"备份完整性检查失败：{integrity}")
+
+        with backup_db.open("rb") as src, gzip.open(archive, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+
+        _encrypt_backup(config, archive, encrypted)
+        shutil.copy2(encrypted, dest_file)
+        dest_file.chmod(0o600)
+
+    keep_local = config["keep_local"]
+    if keep_local > 0:
+        backups = _backup_files(config)
+        for old_backup in backups[:-keep_local]:
+            old_backup.unlink()
+
+    if config["git_remote"]:
+        _git_command(config, "remote", "set-url", "origin", config["git_remote"])
+
+    _git_command(config, "pull", "--ff-only", "origin", config["branch"])
+    _git_command(config, "add", config["subdir"])
+    diff = _git_command(config, "diff", "--cached", "--quiet", check=False)
+    if diff.returncode == 0:
+        return {
+            "code": 0,
+            "msg": "没有新的备份变更",
+            "backup_file": dest_file.name,
+            "pushed": False,
+        }
+
+    _git_command(config, "commit", "-m", f"Add kaowu backup {timestamp}")
+    _git_command(config, "push", "origin", config["branch"])
+    commit = _git_command(config, "rev-parse", "--short", "HEAD").stdout.strip()
+
+    return {
+        "code": 0,
+        "msg": "数据备份已推送到 GitHub",
+        "backup_file": dest_file.name,
+        "backup_size": dest_file.stat().st_size,
+        "commit": commit,
+        "branch": config["branch"],
+        "pushed": True,
+    }
+
+
+@app.get("/api/tools/backup/status")
+async def tool_backup_status(request: Request):
+    check_admin_login(request)
+    check_tools_unlocked(request)
+    return _backup_status_payload()
+
+
+@app.post("/api/tools/backup")
+async def tool_backup_now(request: Request):
+    check_admin_login(request)
+    check_csrf(request)
+    check_tools_unlocked(request)
+    rate_limit(f"tool_backup_{get_client_ip(request)}", max_requests=3, window=300)
+    return _run_database_backup()
 
 
 def _download_response(output: BytesIO, filename_utf8: str, filename_ascii: str, media_type: str):

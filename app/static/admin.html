@@ -781,6 +781,31 @@
                             </span>
                             <span class="tool-title">工作簿中多表合并</span>
                         </button>
+                        <button type="button" class="tool-tile" data-tool-target="toolBackupPage">
+                            <span class="tool-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+                            </span>
+                            <span class="tool-title">数据备份</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="toolBackupPage" class="tool-detail d-none">
+                    <div class="tool-page-header">
+                        <h3>数据备份</h3>
+                        <button type="button" class="btn btn-outline-secondary btn-sm tool-back">返回工具页</button>
+                    </div>
+                    <div class="tool-card">
+                        <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+                            <div>
+                                <div class="fw-semibold">当前数据库快照</div>
+                                <div class="form-text">备份会加密后提交并推送到 GitHub 备份仓库。</div>
+                            </div>
+                            <button type="button" class="btn btn-custom" id="backupNowBtn" data-default-label="立即备份">立即备份</button>
+                        </div>
+                        <div id="backupStatusBox" class="tool-precheck-box">
+                            <div class="text-muted">加载中...</div>
+                        </div>
                     </div>
                 </div>
 
@@ -2508,6 +2533,95 @@
             URL.revokeObjectURL(url);
         }
 
+        function formatBytes(size) {
+            const value = Number(size || 0);
+            if (!value) return '-';
+            if (value < 1024) return value + ' B';
+            if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB';
+            return (value / 1024 / 1024).toFixed(1) + ' MB';
+        }
+
+        function appendBackupRow(container, label, value) {
+            const row = document.createElement('div');
+            row.className = 'd-flex flex-wrap gap-2 justify-content-between border-bottom py-2';
+            const labelEl = document.createElement('span');
+            labelEl.className = 'text-muted';
+            labelEl.textContent = label;
+            const valueEl = document.createElement('span');
+            valueEl.className = 'fw-semibold text-break';
+            valueEl.textContent = value || '-';
+            row.append(labelEl, valueEl);
+            container.appendChild(row);
+        }
+
+        function renderBackupStatus(data) {
+            const box = document.getElementById('backupStatusBox');
+            if (!box) return;
+            box.textContent = '';
+
+            const alert = document.createElement('div');
+            alert.className = 'alert mb-3 ' + (data.configured ? 'alert-success' : 'alert-warning');
+            alert.textContent = data.configured ? '备份配置正常' : '备份尚未完整配置';
+            box.appendChild(alert);
+
+            const rows = document.createElement('div');
+            appendBackupRow(rows, '启用状态', data.enabled ? '已启用' : '未启用');
+            appendBackupRow(rows, '备份仓库目录', data.repo_dir);
+            appendBackupRow(rows, '备份子目录', data.subdir);
+            appendBackupRow(rows, '推送分支', data.branch);
+            appendBackupRow(rows, '本地保留数量', String(data.keep_local ?? '-'));
+            appendBackupRow(rows, '本地备份数量', String(data.backup_count ?? 0));
+            appendBackupRow(rows, '最近备份', data.latest_backup || '暂无');
+            appendBackupRow(rows, '最近备份大小', formatBytes(data.latest_backup_size));
+            appendBackupRow(rows, '最近备份时间', data.latest_backup_mtime || '-');
+            box.appendChild(rows);
+        }
+
+        async function loadBackupStatus() {
+            const box = document.getElementById('backupStatusBox');
+            if (box) box.textContent = '加载中...';
+            try {
+                const res = await fetch('/api/tools/backup/status');
+                if (!res.ok) {
+                    handleToolAuthError(res);
+                    const err = await res.json().catch(() => ({}));
+                    if (box) box.textContent = err.detail || '备份状态加载失败';
+                    return;
+                }
+                renderBackupStatus(await res.json());
+            } catch (err) {
+                if (box) box.textContent = '备份状态加载失败';
+            }
+        }
+
+        async function runBackupNow() {
+            const button = document.getElementById('backupNowBtn');
+            if (!button) return;
+            const defaultLabel = button.dataset.defaultLabel || button.textContent;
+            button.disabled = true;
+            button.textContent = '备份中...';
+            try {
+                const res = await fetch('/api/tools/backup', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': getCsrf() }
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    handleToolAuthError(res);
+                    showToast(data.detail || '备份失败', 'danger');
+                    return;
+                }
+                const suffix = data.commit ? `，提交 ${data.commit}` : '';
+                showToast((data.msg || '备份完成') + suffix, 'success');
+                await loadBackupStatus();
+            } catch (err) {
+                showToast('备份失败，请重试', 'danger');
+            } finally {
+                button.disabled = false;
+                button.textContent = defaultLabel;
+            }
+        }
+
         function showToolLock() {
             document.getElementById('toolLockPanel')?.classList.remove('d-none');
             document.getElementById('toolHome')?.classList.add('d-none');
@@ -2531,6 +2645,9 @@
             }
             if (pageId === 'toolCetPage') {
                 loadPassRateOptions();
+            }
+            if (pageId === 'toolBackupPage') {
+                loadBackupStatus();
             }
         }
 
@@ -2590,6 +2707,8 @@
         document.querySelectorAll('.tool-back').forEach(button => {
             button.addEventListener('click', showToolHome);
         });
+
+        document.getElementById('backupNowBtn')?.addEventListener('click', runBackupNow);
 
         function handleToolAuthError(res) {
             if (res.status === 403) showToolLock();

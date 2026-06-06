@@ -75,6 +75,19 @@ docker compose up -d --build
 | `TRAINING_PUBLIC_VIDEO_URL` | 培训页优先使用的公开视频地址，适合交给 Nginx/Cloudflare 缓存 | — |
 | `TRAINING_VIDEO_DURATION_SECONDS` | 培训视频总时长（秒），前端读取到视频时也会上报更新 | `0` |
 | `TRAINING_COOKIE_MAX_AGE` | 学生培训登录 Cookie 有效期（秒） | `86400` |
+| `BACKUP_ENABLED` | 是否启用工具页手动备份 | `false` |
+| `BACKUP_REPO_DIR` | 容器内 GitHub 备份仓库路径 | `/backup-repo` |
+| `BACKUP_REPO_HOST_DIR` | 宿主机备份仓库路径，用于 Compose 挂载 | `/opt/kaowu-backups` |
+| `BACKUP_SUBDIR` | 备份仓库内的子目录 | `kaowu-system` |
+| `BACKUP_GIT_BRANCH` | 备份推送分支 | `main` |
+| `BACKUP_GIT_REMOTE` | 备份仓库远端地址，配置后会自动设置 origin | — |
+| `BACKUP_KEEP_LOCAL` | 本地保留的加密备份文件数量 | `10` |
+| `BACKUP_GPG_PASSPHRASE_FILE` | 容器内 GPG 对称加密口令文件路径 | — |
+| `BACKUP_GPG_PASSPHRASE_FILE_HOST` | 宿主机 GPG 口令文件路径，用于 Compose 只读挂载 | — |
+| `BACKUP_GPG_PASSPHRASE` | GPG 对称加密口令，不建议生产环境直接使用 | — |
+| `BACKUP_GPG_RECIPIENT` | GPG 公钥加密收件人，设置后优先使用公钥加密 | — |
+| `BACKUP_SSH_KEY_PATH` | 容器内 GitHub 备份专用 SSH 私钥路径 | — |
+| `BACKUP_SSH_KEY_HOST_PATH` | 宿主机 GitHub 备份专用 SSH 私钥路径，用于 Compose 只读挂载 | — |
 
 > 本地开发会自动读取项目根目录或 `app/` 下的 `.env`，但不会覆盖系统环境变量；Docker 部署通过 `docker-compose.yml` 的 `env_file: .env` 传入。
 
@@ -111,6 +124,7 @@ Cloudflare 橙云模式下，可为 `/training-public/*` 单独设置 Cache Rule
 - **考试数据辅助工具**：用于部分考试数据的导入、查询、通过率分析和汇总统计，具体口径以系统页面为准。
 - **毕业生数据管理**：导入届别数据，为统计分析提供基础数据。
 - **工作簿中多表合并**：将一个工作簿内多个工作表合并到一个汇总工作表。
+- **数据备份**：对当前 SQLite 数据库生成一致性快照，加密后提交并推送到 GitHub 备份仓库。
 
 涉及个人信息和成绩数据的工具仅供内部授权人员使用，不建议在公开文档中记录具体数据解析规则或业务口径细节。
 
