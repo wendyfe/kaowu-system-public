@@ -2478,13 +2478,14 @@ def _encrypt_backup(config: dict, archive: Path, encrypted: Path):
         "AES256",
         "--output",
         str(encrypted),
-        str(archive),
     ]
     if config["gpg_passphrase_file"]:
         command.extend(["--passphrase-file", config["gpg_passphrase_file"]])
+        command.append(str(archive))
         _run_backup_command(command, config)
     else:
         command.extend(["--passphrase-fd", "0"])
+        command.append(str(archive))
         _run_backup_command(command, config, input_text=config["gpg_passphrase"])
 
 
