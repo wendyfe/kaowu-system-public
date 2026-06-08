@@ -15,6 +15,22 @@ docker compose up -d --build
 app/db/kaowu.db
 ```
 
+## Production Deployments
+
+- Production code lives on the VPS at `/opt/kaowu-system-public`.
+- Do not deploy by copying edited source files directly into the production worktree with `rsync`, `scp`, `install`, or manual overwrites. That leaves local modifications on the server and can break later `git pull`.
+- Deploy code changes by committing and pushing to GitHub first, then SSH to the VPS and run:
+
+```bash
+cd /opt/kaowu-system-public
+git pull --ff-only
+docker compose up -d --build
+docker compose ps
+```
+
+- Keep production-only files local to the server: `.env`, `app/db/`, training videos, and backup secrets. Never replace them from the local workspace.
+- If an emergency hotfix was already copied to the server, reconcile Git immediately: commit and push the same change, then make the server worktree match Git before ending the task.
+
 ## Dependencies
 
 Python dependencies are pinned in `requirements.txt`: FastAPI, Uvicorn, SQLAlchemy, Jinja2, pandas/openpyxl/xlrd, reportlab, dbfread, itsdangerous, and python-multipart.
