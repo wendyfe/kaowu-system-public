@@ -302,8 +302,10 @@
                 document.querySelector('input[name="name"]').value = formInputValues.name;
                 document.querySelector('input[name="phone"]').value = formInputValues.phone;
                 document.querySelector('input[name="qq"]').value = formInputValues.qq;
-                document.querySelector(`input[name="has_experience"][value="${formInputValues.has_experience}"]`).checked = true;
-                document.querySelector(`input[name="gender"][value="${formInputValues.gender}"]`).checked = true;
+                const experienceInput = document.querySelector(`input[name="has_experience"][value="${formInputValues.has_experience || 'false'}"]`);
+                const genderInput = document.querySelector(`input[name="gender"][value="${formInputValues.gender || '男'}"]`);
+                if (experienceInput) experienceInput.checked = true;
+                if (genderInput) genderInput.checked = true;
 
             } catch (err) {
                 console.error("加载考试列表失败:", err);
@@ -397,6 +399,7 @@
                         name: '',
                         phone: '',
                         qq: '',
+                        gender: '男',
                         has_experience: 'false'
                     };
                     e.target.reset(); // 清空表单
