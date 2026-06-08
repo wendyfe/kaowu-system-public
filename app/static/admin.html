@@ -249,6 +249,18 @@
             color: #6c757d;
             font-size: 0.82rem;
         }
+        .training-summary-card {
+            appearance: none;
+            background: #fff;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+        }
+        .training-summary-card:hover {
+            border-color: #86b7fe !important;
+            box-shadow: 0 0.25rem 0.75rem rgba(13, 110, 253, 0.08);
+        }
+        .training-summary-card.active {
+            background: #f8fbff;
+        }
         @media (max-width: 992px) {
             .invigilator-workspace {
                 grid-template-columns: 1fr;
@@ -607,64 +619,70 @@
                 <div class="card p-4 mb-4">
                     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
                         <h4 class="mb-0">视频节点题</h4>
-                        <button type="button" id="resetTrainingQuestionFormBtn" class="btn btn-sm btn-outline-secondary">新增题目</button>
+                        <div class="d-flex gap-2">
+                            <button type="button" id="resetTrainingQuestionFormBtn" class="btn btn-sm btn-outline-secondary">新增题目</button>
+                            <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#trainingQuestionManager" aria-expanded="false" aria-controls="trainingQuestionManager" id="trainingQuestionToggleBtn">展开</button>
+                        </div>
                     </div>
-                    <form id="trainingQuestionForm" class="row g-3 mb-3">
-                        <input type="hidden" id="trainingQuestionId">
-                        <div class="col-md-5">
-                            <label class="form-label">题干</label>
-                            <input type="text" id="trainingQuestionPrompt" class="form-control" placeholder="例如：监考人员入场后首先应检查什么？" required>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">触发时间</label>
-                            <input type="text" id="trainingQuestionTrigger" class="form-control" placeholder="03:20 或 200" required>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label">正确答案</label>
-                            <select id="trainingQuestionCorrect" class="form-select">
-                                <option value="0">A</option>
-                                <option value="1">B</option>
-                                <option value="2">C</option>
-                                <option value="3">D</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2 d-flex align-items-end">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" id="trainingQuestionActive" checked>
-                                <label class="form-check-label" for="trainingQuestionActive">启用</label>
+                    <div class="collapse" id="trainingQuestionManager">
+                        <form id="trainingQuestionForm" class="row g-3 mb-3">
+                            <input type="hidden" id="trainingQuestionId">
+                            <div class="col-md-5">
+                                <label class="form-label">题干</label>
+                                <input type="text" id="trainingQuestionPrompt" class="form-control" placeholder="例如：监考人员入场后首先应检查什么？" required>
                             </div>
+                            <div class="col-md-3">
+                                <label class="form-label">触发时间</label>
+                                <input type="text" id="trainingQuestionTrigger" class="form-control" placeholder="03:20 或 200" required>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">正确答案</label>
+                                <select id="trainingQuestionCorrect" class="form-select">
+                                    <option value="0">A</option>
+                                    <option value="1">B</option>
+                                    <option value="2">C</option>
+                                    <option value="3">D</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2 d-flex align-items-end">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="trainingQuestionActive" checked>
+                                    <label class="form-check-label" for="trainingQuestionActive">启用</label>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">选项（每行一个）</label>
+                                <textarea id="trainingQuestionOptions" class="form-control" rows="4" placeholder="选项 A&#10;选项 B&#10;选项 C&#10;选项 D" required></textarea>
+                            </div>
+                            <div class="col-12 d-flex gap-2">
+                                <button type="submit" class="btn btn-sm btn-custom">保存题目</button>
+                                <button type="button" id="cancelTrainingQuestionEditBtn" class="btn btn-sm btn-outline-secondary" style="display:none;">取消编辑</button>
+                            </div>
+                        </form>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle" id="trainingQuestionTable">
+                                <thead>
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>题干</th>
+                                        <th>选项</th>
+                                        <th>答案</th>
+                                        <th>状态</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
                         </div>
-                        <div class="col-12">
-                            <label class="form-label">选项（每行一个）</label>
-                            <textarea id="trainingQuestionOptions" class="form-control" rows="4" placeholder="选项 A&#10;选项 B&#10;选项 C&#10;选项 D" required></textarea>
-                        </div>
-                        <div class="col-12 d-flex gap-2">
-                            <button type="submit" class="btn btn-sm btn-custom">保存题目</button>
-                            <button type="button" id="cancelTrainingQuestionEditBtn" class="btn btn-sm btn-outline-secondary" style="display:none;">取消编辑</button>
-                        </div>
-                    </form>
-                    <div class="table-responsive">
-                        <table class="table table-sm align-middle" id="trainingQuestionTable">
-                            <thead>
-                                <tr>
-                                    <th>时间</th>
-                                    <th>题干</th>
-                                    <th>选项</th>
-                                    <th>答案</th>
-                                    <th>状态</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
+                        <div id="trainingQuestionEmpty" class="text-center py-3 text-muted" style="display:none;">暂无题目</div>
                     </div>
-                    <div id="trainingQuestionEmpty" class="text-center py-3 text-muted" style="display:none;">暂无题目</div>
                 </div>
-                <div class="row g-3 mb-4">
-                    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">总报名人数</div><div class="fs-4 fw-bold" id="trainingTotal">0</div></div></div>
-                    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">已完成培训</div><div class="fs-4 fw-bold text-success" id="trainingCompleted">0</div></div></div>
-                    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">学习中</div><div class="fs-4 fw-bold text-primary" id="trainingLearning">0</div></div></div>
-                    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">完成率</div><div class="fs-4 fw-bold" id="trainingRate">0%</div></div></div>
+                <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-5 g-3 mb-4">
+                    <div class="col"><button type="button" class="card p-3 w-100 text-start border training-summary-card active" data-training-status-filter="all"><span class="text-muted small">总报名人数</span><span class="fs-4 fw-bold" id="trainingTotal">0</span></button></div>
+                    <div class="col"><button type="button" class="card p-3 w-100 text-start border training-summary-card" data-training-status-filter="completed"><span class="text-muted small">已完成培训</span><span class="fs-4 fw-bold text-success" id="trainingCompleted">0</span></button></div>
+                    <div class="col"><button type="button" class="card p-3 w-100 text-start border training-summary-card" data-training-status-filter="learning"><span class="text-muted small">学习中</span><span class="fs-4 fw-bold text-primary" id="trainingLearning">0</span></button></div>
+                    <div class="col"><button type="button" class="card p-3 w-100 text-start border training-summary-card" data-training-status-filter="not_started"><span class="text-muted small">未开始</span><span class="fs-4 fw-bold text-secondary" id="trainingNotStarted">0</span></button></div>
+                    <div class="col"><div class="card p-3 h-100"><div class="text-muted small">完成率</div><div class="fs-4 fw-bold" id="trainingRate">0%</div></div></div>
                 </div>
                 <div class="card p-4">
                     <div class="table-responsive">
@@ -1499,6 +1517,8 @@
         });
 
         // ========== 列表加载 ==========
+        let trainingOverviewRows = [];
+        let trainingStatusFilter = "all";
 
         function refreshTrainingRecruitFilter(list) {
             const select = document.getElementById("trainingRecruitFilter");
@@ -1523,6 +1543,22 @@
             badge.className = "badge " + (row.is_completed ? "bg-success" : row.max_watched_seconds > 0 ? "bg-primary" : "bg-secondary");
             badge.textContent = row.training_status || "未开始";
             return badge;
+        }
+
+        function getTrainingStatusKey(row) {
+            if (row.is_completed || row.training_status === "已完成") return "completed";
+            if ((row.max_watched_seconds || 0) > 0 || row.training_status === "学习中") return "learning";
+            return "not_started";
+        }
+
+        function updateTrainingStatusFilterButtons() {
+            document.querySelectorAll("[data-training-status-filter]").forEach(btn => {
+                const active = btn.dataset.trainingStatusFilter === trainingStatusFilter;
+                btn.classList.toggle("active", active);
+                btn.classList.toggle("border-primary", active);
+                btn.classList.toggle("shadow-sm", active);
+                btn.setAttribute("aria-pressed", active ? "true" : "false");
+            });
         }
 
         function formatTrainingSeconds(value) {
@@ -1552,6 +1588,7 @@
             document.getElementById("trainingQuestionCorrect").value = "0";
             document.getElementById("trainingQuestionActive").checked = true;
             document.getElementById("cancelTrainingQuestionEditBtn").style.display = "none";
+            bootstrap.Collapse.getOrCreateInstance(document.getElementById("trainingQuestionManager"), { toggle: false }).show();
         }
 
         function fillTrainingQuestionForm(question) {
@@ -1562,6 +1599,7 @@
             document.getElementById("trainingQuestionCorrect").value = String(question.correct_option_index || 0);
             document.getElementById("trainingQuestionActive").checked = Boolean(question.is_active);
             document.getElementById("cancelTrainingQuestionEditBtn").style.display = "";
+            bootstrap.Collapse.getOrCreateInstance(document.getElementById("trainingQuestionManager"), { toggle: false }).show();
             document.getElementById("trainingQuestionPrompt").focus();
         }
 
@@ -1682,6 +1720,69 @@
             }
         }
 
+        function renderTrainingOverviewRows() {
+            const tbody = document.querySelector("#trainingTable tbody");
+            const emptyEl = document.getElementById("trainingEmpty");
+            if (!tbody || !emptyEl) return;
+            tbody.textContent = "";
+            emptyEl.style.display = "none";
+            const rows = trainingStatusFilter === "all"
+                ? trainingOverviewRows
+                : trainingOverviewRows.filter(row => getTrainingStatusKey(row) === trainingStatusFilter);
+            updateTrainingStatusFilterButtons();
+            if (rows.length === 0) {
+                emptyEl.style.display = "block";
+                emptyEl.textContent = trainingOverviewRows.length ? "当前筛选下暂无报名记录" : "暂无报名记录";
+                return;
+            }
+            rows.forEach(row => {
+                const tr = document.createElement("tr");
+                [
+                    row.recruit_name,
+                    row.name,
+                    row.student_id,
+                    row.phone,
+                ].forEach(value => {
+                    const td = document.createElement("td");
+                    td.textContent = value || "";
+                    tr.appendChild(td);
+                });
+
+                const tdStatus = document.createElement("td");
+                tdStatus.appendChild(makeTrainingBadge(row));
+                tr.appendChild(tdStatus);
+
+                const tdPct = document.createElement("td");
+                const pct = row.progress_pct || 0;
+                const progress = document.createElement("div");
+                progress.className = "progress";
+                progress.style.height = "8px";
+                progress.style.minWidth = "90px";
+                const bar = document.createElement("div");
+                bar.className = "progress-bar " + (row.is_completed ? "bg-success" : "bg-primary");
+                bar.style.width = `${pct}%`;
+                progress.appendChild(bar);
+                const label = document.createElement("div");
+                label.className = "small text-muted mt-1";
+                label.textContent = `${pct}%`;
+                tdPct.appendChild(progress);
+                tdPct.appendChild(label);
+                tr.appendChild(tdPct);
+
+                const tdQuestions = document.createElement("td");
+                tdQuestions.textContent = `答对 ${row.answered_question_count || 0}，作答 ${row.question_attempts || 0}，错 ${row.wrong_attempts || 0}`;
+                tr.appendChild(tdQuestions);
+
+                [row.watched_text, row.last_active_at, row.completed_at].forEach(value => {
+                    const td = document.createElement("td");
+                    td.textContent = value || "-";
+                    if (!value) td.className = "text-muted";
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
         async function loadTrainingOverview() {
             const tbody = document.querySelector("#trainingTable tbody");
             const emptyEl = document.getElementById("trainingEmpty");
@@ -1703,59 +1804,11 @@
                 document.getElementById("trainingTotal").textContent = summary.total || 0;
                 document.getElementById("trainingCompleted").textContent = summary.completed || 0;
                 document.getElementById("trainingLearning").textContent = summary.learning || 0;
+                document.getElementById("trainingNotStarted").textContent = summary.not_started || 0;
                 document.getElementById("trainingRate").textContent = `${summary.completion_rate || 0}%`;
 
-                const rows = result.data || [];
-                if (rows.length === 0) {
-                    emptyEl.style.display = "block";
-                    return;
-                }
-                rows.forEach(row => {
-                    const tr = document.createElement("tr");
-                    [
-                        row.recruit_name,
-                        row.name,
-                        row.student_id,
-                        row.phone,
-                    ].forEach(value => {
-                        const td = document.createElement("td");
-                        td.textContent = value || "";
-                        tr.appendChild(td);
-                    });
-
-                    const tdStatus = document.createElement("td");
-                    tdStatus.appendChild(makeTrainingBadge(row));
-                    tr.appendChild(tdStatus);
-
-                    const tdPct = document.createElement("td");
-                    const pct = row.progress_pct || 0;
-                    const progress = document.createElement("div");
-                    progress.className = "progress";
-                    progress.style.height = "8px";
-                    progress.style.minWidth = "90px";
-                    const bar = document.createElement("div");
-                    bar.className = "progress-bar " + (row.is_completed ? "bg-success" : "bg-primary");
-                    bar.style.width = `${pct}%`;
-                    progress.appendChild(bar);
-                    const label = document.createElement("div");
-                    label.className = "small text-muted mt-1";
-                    label.textContent = `${pct}%`;
-                    tdPct.appendChild(progress);
-                    tdPct.appendChild(label);
-                    tr.appendChild(tdPct);
-
-                    const tdQuestions = document.createElement("td");
-                    tdQuestions.textContent = `答对 ${row.answered_question_count || 0}，作答 ${row.question_attempts || 0}，错 ${row.wrong_attempts || 0}`;
-                    tr.appendChild(tdQuestions);
-
-                    [row.watched_text, row.last_active_at, row.completed_at].forEach(value => {
-                        const td = document.createElement("td");
-                        td.textContent = value || "-";
-                        if (!value) td.className = "text-muted";
-                        tr.appendChild(td);
-                    });
-                    tbody.appendChild(tr);
-                });
+                trainingOverviewRows = result.data || [];
+                renderTrainingOverviewRows();
             } catch (err) {
                 console.error("加载培训进度失败:", err);
                 showToast("加载培训进度失败", "danger");
@@ -2164,6 +2217,18 @@
         document.getElementById('trainingQuestionForm')?.addEventListener('submit', saveTrainingQuestion);
         document.getElementById('resetTrainingQuestionFormBtn')?.addEventListener('click', resetTrainingQuestionForm);
         document.getElementById('cancelTrainingQuestionEditBtn')?.addEventListener('click', resetTrainingQuestionForm);
+        document.querySelectorAll("[data-training-status-filter]").forEach(btn => {
+            btn.addEventListener("click", () => {
+                trainingStatusFilter = btn.dataset.trainingStatusFilter || "all";
+                renderTrainingOverviewRows();
+            });
+        });
+        document.getElementById("trainingQuestionManager")?.addEventListener("shown.bs.collapse", () => {
+            document.getElementById("trainingQuestionToggleBtn").textContent = "收起";
+        });
+        document.getElementById("trainingQuestionManager")?.addEventListener("hidden.bs.collapse", () => {
+            document.getElementById("trainingQuestionToggleBtn").textContent = "展开";
+        });
 
         // 页面加载时获取列表
         loadRecruitList();
