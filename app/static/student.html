@@ -213,7 +213,7 @@
         // ========== QQ群跳转弹窗 ==========
         let qqGroupModalInstance = null;
 
-        function showQQGroupModal(qqGroup) {
+        function showQQGroupModal(qqGroup, trainingRequired = true) {
             if (!qqGroupModalInstance) {
                 qqGroupModalInstance = new bootstrap.Modal(document.getElementById('qqGroupModal'), { backdrop: 'static', keyboard: false });
             }
@@ -224,6 +224,7 @@
             document.getElementById('qqGroupExamName').textContent = `「${examName}」`;
             document.getElementById('qqGroupJumpLink').href = qqGroup;
             document.getElementById('qqGroupLinkText').textContent = qqGroup;
+            document.getElementById('trainingAfterRegLink').style.display = trainingRequired ? '' : 'none';
 
             qqGroupModalInstance.show();
         }
@@ -371,15 +372,17 @@
                     showToast(data.msg || "报名成功", 'success');
                     const regStudentId = formData.get('student_id');
                     const regPhone = formData.get('phone');
+                    const trainingRequired = data.training_required !== false;
                     const trainingLink = document.getElementById('trainingAfterRegLink');
+                    trainingLink.style.display = trainingRequired ? '' : 'none';
                     trainingLink.onclick = function(e) {
                         e.preventDefault();
                         enterTraining(data.reg_id, regStudentId, regPhone);
                     };
 
                     if (data.qq_group) {
-                        showQQGroupModal(data.qq_group);
-                    } else {
+                        showQQGroupModal(data.qq_group, trainingRequired);
+                    } else if (trainingRequired) {
                         setTimeout(() => {
                             if (confirm('报名成功，是否现在学习培训视频？')) {
                                 enterTraining(data.reg_id, regStudentId, regPhone);
@@ -539,27 +542,29 @@
                                 li.appendChild(badge);
                             }
 
-                            const trainingWrap = document.createElement("div");
-                            trainingWrap.className = "mt-3 pt-3 border-top d-flex flex-wrap align-items-center gap-2";
-                            const trainingStatus = document.createElement("span");
-                            trainingStatus.className = "badge " + (item.is_completed ? "bg-success" : item.max_watched_seconds > 0 ? "bg-primary" : "bg-secondary");
-                            trainingStatus.textContent = `培训：${item.training_status || '未开始'} ${item.progress_pct || 0}%`;
-                            trainingWrap.appendChild(trainingStatus);
+                            if (item.training_required !== false) {
+                                const trainingWrap = document.createElement("div");
+                                trainingWrap.className = "mt-3 pt-3 border-top d-flex flex-wrap align-items-center gap-2";
+                                const trainingStatus = document.createElement("span");
+                                trainingStatus.className = "badge " + (item.is_completed ? "bg-success" : item.max_watched_seconds > 0 ? "bg-primary" : "bg-secondary");
+                                trainingStatus.textContent = `培训：${item.training_status || '未开始'} ${item.progress_pct || 0}%`;
+                                trainingWrap.appendChild(trainingStatus);
 
-                            const trainingText = document.createElement("span");
-                            trainingText.className = "text-muted small";
-                            trainingText.textContent = item.watched_text || "";
-                            trainingWrap.appendChild(trainingText);
+                                const trainingText = document.createElement("span");
+                                trainingText.className = "text-muted small";
+                                trainingText.textContent = item.watched_text || "";
+                                trainingWrap.appendChild(trainingText);
 
-                            const trainingBtn = document.createElement("button");
-                            trainingBtn.type = "button";
-                            trainingBtn.className = "btn btn-outline-primary btn-sm ms-auto";
-                            trainingBtn.textContent = item.is_completed ? "复习培训视频" : "继续学习培训";
-                            trainingBtn.addEventListener("click", function() {
-                                enterTraining(item.reg_id, document.getElementById("myStudentId").value, document.getElementById("myPhone").value);
-                            });
-                            trainingWrap.appendChild(trainingBtn);
-                            li.appendChild(trainingWrap);
+                                const trainingBtn = document.createElement("button");
+                                trainingBtn.type = "button";
+                                trainingBtn.className = "btn btn-outline-primary btn-sm ms-auto";
+                                trainingBtn.textContent = item.is_completed ? "复习培训视频" : "继续学习培训";
+                                trainingBtn.addEventListener("click", function() {
+                                    enterTraining(item.reg_id, document.getElementById("myStudentId").value, document.getElementById("myPhone").value);
+                                });
+                                trainingWrap.appendChild(trainingBtn);
+                                li.appendChild(trainingWrap);
+                            }
 
                             ol.appendChild(li);
                         });

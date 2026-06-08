@@ -463,12 +463,17 @@
                 <input type="hidden" id="editExamModes">
             </div>
 
-            <!-- 编辑验收配置 -->
+            <!-- 编辑流程配置 -->
             <div class="mt-4 pt-3 border-top">
-                <h6 class="mb-3">验收配置</h6>
+                <h6 class="mb-3">流程配置</h6>
                 <div class="form-check">
                     <input type="checkbox" class="form-check-input" id="editHasFloorSupervisors" value="true">
                     <label class="form-check-label" for="editHasFloorSupervisors">需要楼栋负责人</label>
+                </div>
+                <div class="form-check mt-2">
+                    <input type="checkbox" class="form-check-input" id="editTrainingRequired" value="true">
+                    <label class="form-check-label" for="editTrainingRequired">本次要求完成培训视频</label>
+                    <div class="form-text">取消勾选后，该招募不进入培训进度统计</div>
                 </div>
             </div>
 
@@ -556,12 +561,20 @@
                 </div>
                 <!-- 验收配置 -->
                 <div class="row mt-4 pt-3 border-top">
-                    <div class="col-12">
+                    <div class="col-md-6">
                         <h5 class="mb-3">验收配置</h5>
                         <div class="form-check">
                             <input type="checkbox" class="form-check-input" name="has_floor_supervisors" id="publishHasFloorSupervisors" value="true">
                             <label class="form-check-label" for="publishHasFloorSupervisors">需要楼栋负责人（大考建议勾选，小考可跳过）</label>
                             <div class="form-text">勾选后验收流程包含楼栋负责人检查环节</div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mt-3 mt-md-0">
+                        <h5 class="mb-3">培训配置</h5>
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" name="training_required" id="publishTrainingRequired" value="true" checked>
+                            <label class="form-check-label" for="publishTrainingRequired">本次要求完成培训视频</label>
+                            <div class="form-text">取消勾选后，学生端不显示培训入口，培训进度页也不统计该招募</div>
                         </div>
                     </div>
                 </div>
@@ -588,6 +601,7 @@
                             <th style="width:12%">已报名人数</th>
                             <th style="width:18%">结束时间</th>
                             <th style="width:10%">状态</th>
+                            <th style="width:10%">培训</th>
                             <th style="width:10%">考场数</th>
                             <th style="width:20%">操作</th>
                         </tr>
@@ -1426,7 +1440,7 @@
         let currentEditOldData = null;
         const editOffcanvas = new bootstrap.Offcanvas(document.getElementById('editOffcanvas'));
 
-        function openEditPanel(id, oldName, oldNum, oldEndTime, oldQqGroup, oldHasFloor) {
+        function openEditPanel(id, oldName, oldNum, oldEndTime, oldQqGroup, oldHasFloor, oldTrainingRequired) {
             currentEditId = id;
             currentEditOldData = { name: oldName, num: oldNum, endTime: oldEndTime };
 
@@ -1434,6 +1448,7 @@
             document.getElementById('editNeedNum').value = oldNum;
             document.getElementById('editQqGroup').value = oldQqGroup || '';
             document.getElementById('editHasFloorSupervisors').checked = !!oldHasFloor;
+            document.getElementById('editTrainingRequired').checked = oldTrainingRequired !== false;
 
             // 设置日期选择器的值（后端格式 "YYYY-MM-DD HH:MM" → flatpickr 自动解析）
             editPicker.setDate(oldEndTime && oldEndTime.trim() ? oldEndTime : '', false);
@@ -1485,6 +1500,7 @@
             if (newEndTime) formData.append('end_time_str', newEndTime);
             if (newQqGroup) formData.append('qq_group', newQqGroup);
             formData.append('has_floor_supervisors', document.getElementById('editHasFloorSupervisors').checked);
+            formData.append('training_required', document.getElementById('editTrainingRequired').checked);
 
             updateEditCount();
             const eIds = document.getElementById('editClassroomIds').value;
@@ -1529,7 +1545,7 @@
             allOpt.value = "";
             allOpt.textContent = "全部招募";
             select.appendChild(allOpt);
-            (list || []).forEach(item => {
+            (list || []).filter(item => item.training_required !== false).forEach(item => {
                 const opt = document.createElement("option");
                 opt.value = item.id;
                 opt.textContent = item.exam_name;
@@ -1872,6 +1888,15 @@
                     tdStatus.appendChild(statusBadge);
                     tr.appendChild(tdStatus);
 
+                    const tdTraining = document.createElement("td");
+                    const trainingBadge = document.createElement("span");
+                    trainingBadge.className = item.training_required === false
+                        ? "badge bg-secondary bg-opacity-10 text-secondary px-3 py-2"
+                        : "badge bg-primary bg-opacity-10 text-primary px-3 py-2";
+                    trainingBadge.textContent = item.training_required === false ? "不要求" : "要求";
+                    tdTraining.appendChild(trainingBadge);
+                    tr.appendChild(tdTraining);
+
                     const tdRooms = document.createElement("td");
                     const totalRooms = item.total_exam_rooms || 0;
                     tdRooms.textContent = totalRooms > 0 ? `${totalRooms} 个` : '未配置';
@@ -1889,7 +1914,7 @@
                     editLink.textContent = "编辑";
                     editLink.onclick = function (e) {
                         e.preventDefault();
-                        openEditPanel(item.id, item.exam_name, item.need_num, item.end_time, item.qq_group, item.has_floor_supervisors);
+                        openEditPanel(item.id, item.exam_name, item.need_num, item.end_time, item.qq_group, item.has_floor_supervisors, item.training_required);
                     };
                     tdActions.appendChild(editLink);
 
@@ -2167,6 +2192,8 @@
             submitBtn.textContent = "发布中...";
 
             const formData = new FormData(e.target);
+            formData.set("has_floor_supervisors", document.getElementById("publishHasFloorSupervisors").checked ? "true" : "false");
+            formData.set("training_required", document.getElementById("publishTrainingRequired").checked ? "true" : "false");
 
             // 从 Flatpickr 获取格式化的结束时间（已是 "YYYY-MM-DD HH:MM" 格式）
             const endTimeVal = document.getElementById('publishEndTime').value.trim();

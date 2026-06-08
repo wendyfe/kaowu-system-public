@@ -171,6 +171,7 @@ class Recruitment(Base):
     qq_group = Column(String(300), nullable=True)  # QQ加群链接（qm.qq.com 或 tencent:// 协议）
     general_supervisor_id = Column(Integer, nullable=True)  # 总负责人，关联 registration.id
     has_floor_supervisors = Column(Boolean, default=False)  # 是否需要楼栋负责人（大考/小考自适应）
+    training_required = Column(Boolean, default=True)  # 本次招募是否要求完成培训视频
     end_time = Column(DateTime, nullable=True)   # 北京时间
 
 class RecruitmentClassroom(Base):
@@ -441,6 +442,14 @@ except Exception:
 try:
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE recruitment ADD COLUMN has_floor_supervisors BOOLEAN DEFAULT 0"))
+        conn.commit()
+except Exception:
+    pass  # 字段已存在
+
+# 数据库迁移：training_required 字段（既有招募默认要求培训，避免历史培训统计语义变化）
+try:
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE recruitment ADD COLUMN training_required BOOLEAN DEFAULT 1"))
         conn.commit()
 except Exception:
     pass  # 字段已存在
@@ -1120,8 +1129,15 @@ def get_training_question_stats(registration_ids: list[int], db: Session) -> dic
     return stats
 
 
-def make_training_response(reg: Registration, db: Session):
+def ensure_training_required(reg: Registration, db: Session) -> Recruitment | None:
     recruit = db.query(Recruitment).filter(Recruitment.id == reg.recruitment_id).first()
+    if recruit and not recruit.training_required:
+        raise HTTPException(400, "该报名项目不需要培训")
+    return recruit
+
+
+def make_training_response(reg: Registration, db: Session):
+    recruit = ensure_training_required(reg, db)
     progress = get_or_create_training_progress(reg.id, db)
     questions = get_active_training_questions(db)
     answered_ids = get_correct_training_question_ids(reg.id, db)
@@ -1213,6 +1229,19 @@ async def training_auth(
     if not regs:
         raise HTTPException(404, "未找到匹配的报名记录")
 
+    if not registration_id:
+        recruit_ids = [r.recruitment_id for r in regs]
+        training_recruit_ids = {
+            r.id
+            for r in db.query(Recruitment).filter(
+                Recruitment.id.in_(recruit_ids),
+                Recruitment.training_required == True
+            ).all()
+        } if recruit_ids else set()
+        regs = [r for r in regs if r.recruitment_id in training_recruit_ids]
+        if not regs:
+            raise HTTPException(400, "你的报名项目不需要培训")
+
     if not registration_id and len(regs) > 1:
         recruit_ids = [r.recruitment_id for r in regs]
         recruit_map = {
@@ -1262,6 +1291,7 @@ async def training_progress(
 ):
     reg = get_training_cookie_registration(request, db)
     rate_limit(f"training_progress_{reg.id}", max_requests=20, window=60)
+    ensure_training_required(reg, db)
 
     progress = get_or_create_training_progress(reg.id, db)
     now = now_beijing()
@@ -1315,6 +1345,7 @@ async def training_question_answer(
 ):
     reg = get_training_cookie_registration(request, db)
     rate_limit(f"training_answer_{reg.id}", max_requests=30, window=60)
+    ensure_training_required(reg, db)
 
     question = db.query(TrainingQuestion).filter(
         TrainingQuestion.id == question_id,
@@ -1371,7 +1402,8 @@ async def training_question_answer(
 async def training_video(request: Request):
     db = SessionLocal()
     try:
-        get_training_cookie_registration(request, db)
+        reg = get_training_cookie_registration(request, db)
+        ensure_training_required(reg, db)
     finally:
         db.close()
 
@@ -1447,6 +1479,7 @@ async def add_recruit(
     classroom_ids: str = Form(""),      # 逗号分隔的教室ID
     exam_modes: str = Form(""),         # 逗号分隔的模式
     has_floor_supervisors: bool = Form(False),
+    training_required: bool = Form(True),
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
@@ -1469,7 +1502,14 @@ async def add_recruit(
                     detail=f"结束时间格式错误（收到: {end_time_str}），应为 YYYY-MM-DD HH:MM 或 YYYY-MM-DDTHH:MM"
                 )
 
-    recruit = Recruitment(exam_name=exam_name.strip(), need_num=need_num, end_time=end_time, qq_group=normalize_qq_group_url(qq_group), has_floor_supervisors=has_floor_supervisors)
+    recruit = Recruitment(
+        exam_name=exam_name.strip(),
+        need_num=need_num,
+        end_time=end_time,
+        qq_group=normalize_qq_group_url(qq_group),
+        has_floor_supervisors=has_floor_supervisors,
+        training_required=training_required,
+    )
     db.add(recruit)
     db.commit()
     db.refresh(recruit)
@@ -1520,6 +1560,7 @@ async def edit_recruit(
     classroom_ids: str = Form(""),      # 逗号分隔的教室ID
     exam_modes: str = Form(""),         # 逗号分隔的模式
     has_floor_supervisors: bool = Form(False),
+    training_required: bool = Form(True),
     db: Session = Depends(get_db)
 ):
     check_admin_login(request)
@@ -1537,13 +1578,22 @@ async def edit_recruit(
 
     recruit.exam_name = exam_name.strip()
     recruit.need_num = need_num
+    recruit.end_time = None
     if end_time_str:
+        cleaned = end_time_str.replace("T", " ").strip()
         try:
-            recruit.end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M")
-        except:
-            raise HTTPException(400, "结束时间格式错误")
+            recruit.end_time = datetime.strptime(cleaned, "%Y-%m-%d %H:%M")
+        except ValueError:
+            try:
+                recruit.end_time = datetime.strptime(cleaned, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                raise HTTPException(
+                    400,
+                    detail=f"结束时间格式错误（收到: {end_time_str}），应为 YYYY-MM-DD HH:MM 或 YYYY-MM-DDTHH:MM"
+                )
     recruit.qq_group = normalize_qq_group_url(qq_group)
     recruit.has_floor_supervisors = has_floor_supervisors
+    recruit.training_required = training_required
 
     # 更新考场配置（如果有提供）
     if classroom_ids and exam_modes:
@@ -1654,6 +1704,7 @@ async def get_recruit_list(db: Session = Depends(get_db)):
             "exam_name": r.exam_name,
             "need_num": r.need_num,
             "remaining": remaining,
+            "training_required": bool(r.training_required),
             "end_time": r.end_time.strftime("%Y-%m-%d %H:%M") if r.end_time else "不限时"
         })
     return result
@@ -1688,6 +1739,7 @@ async def get_admin_recruit_list(request: Request, db: Session = Depends(get_db)
             "status": status,
             "qq_group": r.qq_group,
             "has_floor_supervisors": r.has_floor_supervisors,
+            "training_required": bool(r.training_required),
             "classrooms": classrooms_info,
             "total_exam_rooms": total_exam_rooms,
         })
@@ -1715,7 +1767,13 @@ async def view_registrations(request: Request, recruit_id: int, db: Session = De
     for r in regs:
         training = serialize_training_progress(progress_map.get(r.id))
         q_stats = question_stats.get(r.id, {})
-        if active_question_count and q_stats.get("answered_question_count", 0) < active_question_count:
+        if not recruit.training_required:
+            training["is_completed"] = True
+            training["training_status"] = "无需培训"
+            training["progress_pct"] = 100
+            training["watched_text"] = ""
+            training["completed_at"] = ""
+        elif active_question_count and q_stats.get("answered_question_count", 0) < active_question_count:
             training["is_completed"] = False
             training["training_status"] = "学习中" if training["max_watched_seconds"] > 0 else "未开始"
             training["completed_at"] = ""
@@ -1732,6 +1790,7 @@ async def view_registrations(request: Request, recruit_id: int, db: Session = De
             "answered_question_count": q_stats.get("answered_question_count", 0),
             "question_attempts": q_stats.get("question_attempts", 0),
             "wrong_attempts": q_stats.get("wrong_attempts", 0),
+            "training_required": bool(recruit.training_required),
             **training,
         })
     return rows
@@ -1856,7 +1915,13 @@ async def student_register(
     if is_full:
         raise HTTPException(400, "报名人数已满")
 
-    return {"code": 0, "msg": "报名成功", "qq_group": recruit.qq_group, "reg_id": new_registration_id}
+    return {
+        "code": 0,
+        "msg": "报名成功",
+        "qq_group": recruit.qq_group,
+        "reg_id": new_registration_id,
+        "training_required": bool(recruit.training_required),
+    }
 
 # 查询我的报名记录（新增可取消标识+报名ID+QQ号）
 @app.post("/api/my-registrations")
@@ -1901,8 +1966,15 @@ async def my_registrations(
             if recruit.is_active:
                 if not recruit.end_time or now < recruit.end_time:
                     can_cancel = True
+            training_required = bool(recruit.training_required)
             training = serialize_training_progress(progress_map.get(reg.id))
-            if active_question_count and question_stats.get(reg.id, {}).get("answered_question_count", 0) < active_question_count:
+            if not training_required:
+                training["is_completed"] = True
+                training["training_status"] = "无需培训"
+                training["progress_pct"] = 100
+                training["watched_text"] = ""
+                training["completed_at"] = ""
+            elif active_question_count and question_stats.get(reg.id, {}).get("answered_question_count", 0) < active_question_count:
                 training["is_completed"] = False
                 training["training_status"] = "学习中" if training["max_watched_seconds"] > 0 else "未开始"
                 training["completed_at"] = ""
@@ -1917,6 +1989,7 @@ async def my_registrations(
                 "qq": reg.qq,  # 新增QQ号
                 "gender": reg.gender,
                 "qq_group": recruit.qq_group,  # 考务QQ群号
+                "training_required": training_required,
                 **training
             })
     return {"code": 0, "data": result}
@@ -2019,7 +2092,14 @@ async def export_excel(request: Request, recruit_id: int, db: Session = Depends(
     for reg in regs:
         training = serialize_training_progress(progress_map.get(reg.id))
         q_stats = question_stats.get(reg.id, {})
-        if active_question_count and q_stats.get("answered_question_count", 0) < active_question_count:
+        if not recruit.training_required:
+            training["training_status"] = "无需培训"
+            training["progress_pct"] = 100
+            training["watched_text"] = ""
+            training["last_active_at"] = ""
+            training["completed_at"] = ""
+            q_stats = {}
+        elif active_question_count and q_stats.get("answered_question_count", 0) < active_question_count:
             training["is_completed"] = False
             training["training_status"] = "学习中" if training["max_watched_seconds"] > 0 else "未开始"
             training["completed_at"] = ""
@@ -2065,7 +2145,35 @@ async def admin_training_overview(request: Request, recruit_id: int | None = Non
     check_admin_login(request)
     reg_query = db.query(Registration)
     if recruit_id:
+        recruit = db.query(Recruitment).filter(Recruitment.id == recruit_id).first()
+        if not recruit or not recruit.training_required:
+            return {
+                "summary": {
+                    "total": 0,
+                    "completed": 0,
+                    "learning": 0,
+                    "not_started": 0,
+                    "completion_rate": 0,
+                },
+                "data": [],
+            }
         reg_query = reg_query.filter(Registration.recruitment_id == recruit_id)
+    else:
+        training_recruit_ids = [
+            r.id for r in db.query(Recruitment.id).filter(Recruitment.training_required == True).all()
+        ]
+        if not training_recruit_ids:
+            return {
+                "summary": {
+                    "total": 0,
+                    "completed": 0,
+                    "learning": 0,
+                    "not_started": 0,
+                    "completion_rate": 0,
+                },
+                "data": [],
+            }
+        reg_query = reg_query.filter(Registration.recruitment_id.in_(training_recruit_ids))
     regs = reg_query.order_by(Registration.create_time.desc()).all()
 
     recruit_ids = list({r.recruitment_id for r in regs})
