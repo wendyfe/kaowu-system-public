@@ -1363,8 +1363,13 @@ async def training_question_answer(
 
 
 @app.get("/api/training/video")
-async def training_video(request: Request, db: Session = Depends(get_db)):
-    get_training_cookie_registration(request, db)
+async def training_video(request: Request):
+    db = SessionLocal()
+    try:
+        get_training_cookie_registration(request, db)
+    finally:
+        db.close()
+
     video_path = Path(TRAINING_VIDEO_PATH)
     if not video_path.exists() or not video_path.is_file():
         raise HTTPException(404, "培训视频文件不存在，请联系管理员配置")
