@@ -6,6 +6,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Float, Text, func, UniqueConstraint, text, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.pool import NullPool
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 import os
@@ -143,14 +144,18 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 DB_DIR = os.getenv("DB_DIR", os.path.join(os.path.dirname(__file__), "db"))
 DB_PATH = os.path.join(DB_DIR, "kaowu.db")
 os.makedirs(DB_DIR, exist_ok=True)
-engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
+engine = create_engine(
+    f"sqlite:///{DB_PATH}",
+    connect_args={"check_same_thread": False, "timeout": 30},
+    poolclass=NullPool,
+)
 
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragmas(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.execute("PRAGMA busy_timeout=30000")
     cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
