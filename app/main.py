@@ -1171,11 +1171,11 @@ async def index(request: Request):  # 新增 Request 参数，供模板使用
 
 @app.get("/student", response_class=HTMLResponse)
 async def student_page():
-    return FileResponse("static/student.html")
+    return FileResponse("static/student.html", headers={"Cache-Control": "no-store"})
 
 @app.get("/training", response_class=HTMLResponse)
 async def training_page():
-    return FileResponse("static/training.html")
+    return FileResponse("static/training.html", headers={"Cache-Control": "no-store"})
 
 @app.get("/admin/login", response_class=HTMLResponse)
 async def admin_login_page():
@@ -1184,7 +1184,7 @@ async def admin_login_page():
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
     check_admin_login(request)
-    return FileResponse("static/admin.html")
+    return FileResponse("static/admin.html", headers={"Cache-Control": "no-store"})
 
 # ==================== 接口路由 ====================
 # 管理员登录/登出（不变）
