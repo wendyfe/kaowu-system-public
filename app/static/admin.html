@@ -4427,13 +4427,13 @@ function renderSupervisorTab() {
     const container = document.getElementById('tabSupervisorContent');
     const data = groupingData;
 
-    // Auto-detect zones from selected classrooms
+    // Auto-detect zones from classroom names and their parent buildings
     const zones = [...new Set(data.classrooms.map(c => c.zone).filter(z => z && z !== '未分区'))];
     const classroomsByZone = {};
     zones.forEach(z => { classroomsByZone[z] = data.classrooms.filter(c => c.zone === z); });
 
     if (zones.length === 0) {
-        container.innerHTML = `<div class="alert alert-warning py-2">⚠️ 根据当前考场配置未检测到楼栋分区。<br><small>如果教室名称含英文字母（如 B101），将自动推导为对应栋（B栋）。请确认发布招募时已选择考场。</small></div>`;
+        container.innerHTML = `<div class="alert alert-warning py-2">⚠️ 根据当前考场配置未检测到楼栋分区。<br><small>系统会根据教室名称识别 A栋等区域，并将综合楼等独立教学楼作为同级区域。请确认发布招募时已选择考场。</small></div>`;
         return;
     }
 

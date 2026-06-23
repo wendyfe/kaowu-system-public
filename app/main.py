@@ -568,23 +568,26 @@ def _cleanup_rate_limits(now: float | None = None):
 
 # ==================== 考场工具函数 ====================
 
-def detect_zone(classroom_name: str) -> str | None:
-    """从教室名称推导"栋"信息。
-    规则：
-    - 首字母为英文字母 → 返回该字母 + "栋"（B101 → B栋）
-    - 首字母为数字 → 返回 None（综合楼 101 → 无分区）
+def detect_zone(classroom_name: str, building_name: str | None = None) -> str | None:
+    """从教室名称和所属教学楼推导楼栋/负责区域。
+
+    树人楼内以教室名称的英文字母区分 A-F 栋；综合楼等独立楼栋
+    则直接使用教学楼名称，与 A-F 栋处于同一负责层级。
     """
     if not classroom_name or not classroom_name.strip():
-        return None
-    first_char = classroom_name.strip()[0]
-    if 'A' <= first_char.upper() <= 'Z':
-        return f"{first_char.upper()}栋"
+        return building_name.strip() if building_name and building_name.strip() else None
+    first_char = classroom_name.strip()[0].upper()
+    if 'A' <= first_char <= 'Z':
+        return f"{first_char}栋"
+    if building_name and building_name.strip():
+        return building_name.strip()
     return None
 
 
 def get_rc_classroom_and_zone(rc: RecruitmentClassroom, db: Session):
     cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
-    zone = detect_zone(cr.name) if cr else None
+    building = db.query(Building).filter(Building.id == cr.building_id).first() if cr else None
+    zone = detect_zone(cr.name, building.name if building else None) if cr else None
     return cr, zone or "未分区"
 
 
@@ -3932,7 +3935,7 @@ async def get_classrooms(building_id: int = None, include_disabled: bool = False
 
     result = []
     for c in classrooms:
-        zone = detect_zone(c.name)
+        zone = detect_zone(c.name, building_map.get(c.building_id))
         result.append({
             "id": c.id,
             "building_id": c.building_id,
@@ -4139,11 +4142,12 @@ async def get_manual_grouping_data(recruit_id: int, db: Session = Depends(get_db
     for rc in rcs:
         cr = db.query(Classroom).filter(Classroom.id == rc.classroom_id).first()
         if cr:
+            building = db.query(Building).filter(Building.id == cr.building_id).first()
             classrooms_info.append({
                 "rc_id": rc.id,
                 "classroom_id": rc.classroom_id,
                 "name": cr.name,
-                "zone": detect_zone(cr.name) or "未分区",
+                "zone": detect_zone(cr.name, building.name if building else None) or "未分区",
                 "exam_count": 2 if rc.exam_mode == "double" else 1,
             })
 
