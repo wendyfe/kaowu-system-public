@@ -4442,6 +4442,74 @@ async def set_group_members(
     return {"code": 0, "msg": "组成员已更新"}
 
 
+@app.put("/api/recruit/{recruit_id}/groups/classrooms")
+async def set_all_group_classrooms(
+    request: Request, recruit_id: int,
+    db: Session = Depends(get_db)
+):
+    """原子保存本次招募的全部组-教室分配。"""
+    check_admin_login(request)
+    check_csrf(request)
+    _check_not_finalized(recruit_id, db)
+
+    body = await request.json()
+    assignments = body.get("assignments", {})
+    if not isinstance(assignments, dict):
+        raise HTTPException(400, "教室分配格式错误")
+
+    groups = db.query(RecruitmentGroup).filter(
+        RecruitmentGroup.recruitment_id == recruit_id
+    ).all()
+    group_ids = {g.id for g in groups}
+
+    normalized = {}
+    assigned_rc_ids = set()
+    for raw_group_id, raw_rc_ids in assignments.items():
+        try:
+            group_id = int(raw_group_id)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "工作组编号格式错误")
+        if group_id not in group_ids:
+            raise HTTPException(400, f"工作组不存在：{group_id}")
+        if not isinstance(raw_rc_ids, list):
+            raise HTTPException(400, f"第 {group_id} 组教室数据格式错误")
+
+        rc_ids = []
+        for raw_rc_id in raw_rc_ids:
+            try:
+                rc_id = int(raw_rc_id)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "教室编号格式错误")
+            if rc_id in assigned_rc_ids:
+                raise HTTPException(400, f"教室被重复分配：{rc_id}")
+            assigned_rc_ids.add(rc_id)
+            rc_ids.append(rc_id)
+        normalized[group_id] = rc_ids
+
+    valid_rc_ids = {
+        rc_id for (rc_id,) in db.query(RecruitmentClassroom.id).filter(
+            RecruitmentClassroom.recruitment_id == recruit_id
+        ).all()
+    }
+    invalid_rc_ids = assigned_rc_ids - valid_rc_ids
+    if invalid_rc_ids:
+        raise HTTPException(400, f"教室不属于本次考试：{sorted(invalid_rc_ids)}")
+
+    db.query(RecruitmentGroupClassroom).filter(
+        RecruitmentGroupClassroom.group_id.in_(group_ids)
+    ).delete(synchronize_session=False)
+
+    for group_id, rc_ids in normalized.items():
+        for rc_id in rc_ids:
+            db.add(RecruitmentGroupClassroom(
+                group_id=group_id,
+                recruitment_classroom_id=rc_id,
+            ))
+
+    db.commit()
+    return {"code": 0, "msg": "教室分配已保存"}
+
+
 @app.put("/api/recruit/{recruit_id}/groups/{group_id}/classrooms")
 async def set_group_classrooms(
     request: Request, recruit_id: int, group_id: int,

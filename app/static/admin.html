@@ -4688,8 +4688,10 @@ async function deleteGroup(groupId) {
     } catch (err) { showToast('删除失败', 'danger'); }
 }
 
-let classroomPoolSortable = null;
+let classroomPoolSortables = [];
 let classroomGroupSortables = [];
+let classroomSaveInFlight = false;
+let classroomSavePending = false;
 
 function renderClassroomsTab() {
     const container = document.getElementById('tabClassroomsContent');
@@ -4704,7 +4706,8 @@ function renderClassroomsTab() {
         return;
     }
 
-    if (classroomPoolSortable) classroomPoolSortable.destroy();
+    classroomPoolSortables.forEach(s => s.destroy());
+    classroomPoolSortables = [];
     classroomGroupSortables.forEach(s => s.destroy());
     classroomGroupSortables = [];
 
@@ -4712,12 +4715,16 @@ function renderClassroomsTab() {
     data.groups.forEach(g => g.classroom_rc_ids.forEach(rid => assignedRcIds.add(rid)));
 
     const zoneClassrooms = {};
-    data.classrooms.forEach(c => {
+    data.classrooms.filter(c => !assignedRcIds.has(c.rc_id)).forEach(c => {
         if (!zoneClassrooms[c.zone]) zoneClassrooms[c.zone] = [];
         zoneClassrooms[c.zone].push(c);
     });
 
-    let html = `<div class="row">`;
+    const assignedCount = assignedRcIds.size;
+    let html = `<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">`;
+    html += `<div class="fw-bold" id="classroomAssignmentProgress">已分配 ${assignedCount}/${data.classrooms.length} 间｜待分配 ${data.classrooms.length - assignedCount} 间</div>`;
+    html += `<div class="small text-success" id="classroomAssignmentSaveStatus">✓ 已保存</div>`;
+    html += `</div><div class="row">`;
 
     // LEFT: Classroom pool (with checkboxes)
     html += `<div class="col-md-4">`;
@@ -4728,30 +4735,24 @@ function renderClassroomsTab() {
     html += `<div id="classroomPool" class="border rounded p-2" style="min-height:200px;max-height:60vh;overflow-y:auto">`;
     let hasUnassigned = false;
     for (const [zone, classrooms] of Object.entries(zoneClassrooms)) {
+        html += `<div class="classroom-zone-section" data-zone="${escapeHtml(zone)}">`;
         html += `<div class="small text-muted mt-2 mb-1 fw-bold">${escapeHtml(zone)}</div>`;
+        html += `<div class="classroom-zone-list">`;
         classrooms.forEach(c => {
-            if (assignedRcIds.has(c.rc_id)) {
-                html += `<div class="border rounded p-2 mb-1 text-center" style="opacity:0.35;background:#eee" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}">`;
-                html += `<div class="small fw-bold">${escapeHtml(c.name)}</div>`;
-                html += `<div class="small text-muted">${c.exam_count}考场（已分配）</div></div>`;
-            } else {
-                hasUnassigned = true;
-                html += `<div class="border rounded p-2 mb-1 bg-white classroom-card" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}">`;
-                html += `<input type="checkbox" class="form-check-input me-1 classroom-select-cb" data-rc-id="${c.rc_id}" style="cursor:pointer" onclick="event.stopPropagation()">`;
-                html += `<strong class="small">${escapeHtml(c.name)}</strong>`;
-                html += `<span class="small text-muted ms-1">${c.exam_count}考场</span></div>`;
-            }
+            hasUnassigned = true;
+            html += classroomPoolCardHtml(c);
         });
+        html += `</div></div>`;
     }
     if (!hasUnassigned) {
-        html += `<div class="text-muted small text-center py-3">所有教室已分配完毕</div>`;
+        html += `<div class="text-muted small text-center py-3 classroom-pool-empty">所有教室已分配完毕</div>`;
     }
     html += `</div></div>`;
 
     // RIGHT: Group drop zones (with batch assign button)
     html += `<div class="col-md-8">`;
-    html += `<div class="fw-bold mb-2">组投放区（拖放或批量分配）</div>`;
-    html += `<div style="max-height:60vh;overflow-y:auto">`;
+    html += `<div class="fw-bold mb-2">全部工作组（可继续追加、移除或组间调整）</div>`;
+    html += `<div id="classroomGroupList" style="max-height:60vh;overflow-y:auto">`;
 
     data.groups.forEach((g, idx) => {
         const memberNames = g.member_ids.map(mid => {
@@ -4763,23 +4764,23 @@ function renderClassroomsTab() {
         const roomCount = gRooms.length;
         const examCount = gRooms.reduce((s, c) => s + c.exam_count, 0);
 
-        html += `<div class="border rounded p-3 mb-3" data-group-id="${g.id}">`;
+        html += `<div class="border rounded p-3 mb-3 classroom-assignment-group" data-group-id="${g.id}">`;
         html += `<div class="d-flex justify-content-between align-items-center mb-1">`;
         html += `<span class="fw-bold">第${idx+1}组：${memberNames || '（空组）'}</span>`;
         html += `<button class="btn btn-sm btn-outline-primary" onclick="batchAssignTo(${g.id})" title="将所有勾选的教室分配到本组">📥 接收已选</button>`;
         html += `</div>`;
         html += `<div class="group-classroom-drop border rounded p-2" data-group-id="${g.id}" style="min-height:60px;border-style:dashed !important">`;
         gRooms.forEach(c => {
-            html += `<div class="border rounded p-1 mb-1 bg-white small classroom-card" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}" style="cursor:grab;display:inline-block;margin:2px">`;
-            html += `${escapeHtml(c.name)} <span class="text-muted">${c.exam_count}考场</span>`;
-            html += `<button class="btn-close btn-close-sm ms-1" style="font-size:0.5rem" onclick="event.stopPropagation();unassignClassroom(${c.rc_id}, ${g.id})" title="移除"></button>`;
-            html += `</div>`;
+            html += classroomGroupCardHtml(c, g.id);
         });
         if (gRooms.length === 0) {
-            html += `<div class="text-muted small text-center py-2">拖放教室或点「接收已选」</div>`;
+            html += `<div class="text-muted small text-center py-2 group-classroom-empty">拖放教室或点「接收已选」</div>`;
         }
         html += `</div>`;
-        html += `<div class="small text-muted mt-1">📊 <span class="group-stats" data-group-id="${g.id}">${roomCount}间教室 → ${examCount}个考场</span></div>`;
+        html += `<div class="d-flex justify-content-between align-items-center small mt-1">`;
+        html += `<span class="text-muted">📊 <span class="group-stats" data-group-id="${g.id}">${roomCount}间教室 → ${examCount}个考场</span></span>`;
+        html += `<span class="group-save-status text-success" data-group-id="${g.id}">✓ 已保存</span>`;
+        html += `</div>`;
         html += `</div>`;
     });
 
@@ -4788,23 +4789,7 @@ function renderClassroomsTab() {
     container.innerHTML = html;
 
     // Init SortableJS — exclude checkbox clicks from triggering drag
-    const poolEl = document.getElementById('classroomPool');
-    if (poolEl) {
-        classroomPoolSortable = new Sortable(poolEl, {
-            group: {
-                name: 'classroom-assign',
-                pull: true,
-                put: function(to, from) {
-                    return from.el.classList.contains('group-classroom-drop');
-                }
-            },
-            animation: 150,
-            sort: false,
-            filter: '.classroom-select-cb',
-            preventOnFilter: false,
-            onEnd: function() { updateAllGroupStats(); saveAllClassroomAssignments(); }
-        });
-    }
+    document.querySelectorAll('.classroom-zone-list').forEach(initClassroomPoolSortable);
 
     document.querySelectorAll('.group-classroom-drop').forEach(area => {
         const s = new Sortable(area, {
@@ -4812,14 +4797,50 @@ function renderClassroomsTab() {
                 name: 'classroom-assign',
                 pull: true,
                 put: function(to, from) {
-                    return from.el.id === 'classroomPool';
+                    return from.el.classList.contains('classroom-zone-list') || from.el.classList.contains('group-classroom-drop');
                 }
             },
             animation: 150,
-            onEnd: function() { updateAllGroupStats(); saveAllClassroomAssignments(); }
+            onEnd: function() {
+                normalizeClassroomAssignmentUi();
+                saveAllClassroomAssignments();
+            }
         });
         classroomGroupSortables.push(s);
     });
+}
+
+function initClassroomPoolSortable(zoneList) {
+    const sortable = new Sortable(zoneList, {
+        group: {
+            name: 'classroom-assign',
+            pull: true,
+            put: false,
+        },
+        animation: 150,
+        sort: false,
+        filter: '.classroom-select-cb',
+        preventOnFilter: false,
+        onEnd: function() {
+            normalizeClassroomAssignmentUi();
+            saveAllClassroomAssignments();
+        }
+    });
+    classroomPoolSortables.push(sortable);
+}
+
+function classroomPoolCardHtml(c) {
+    return `<div class="border rounded p-2 mb-1 bg-white classroom-card" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}">`
+        + `<input type="checkbox" class="form-check-input me-1 classroom-select-cb" data-rc-id="${c.rc_id}" style="cursor:pointer" onclick="event.stopPropagation()">`
+        + `<strong class="small classroom-card-name">${escapeHtml(c.name)}</strong>`
+        + `<span class="small text-muted ms-1 classroom-card-exam">${c.exam_count}考场</span></div>`;
+}
+
+function classroomGroupCardHtml(c, groupId) {
+    return `<div class="border rounded p-1 mb-1 bg-white small classroom-card" data-rc-id="${c.rc_id}" data-exam-count="${c.exam_count}" style="cursor:grab;display:inline-block;margin:2px">`
+        + `<strong class="classroom-card-name">${escapeHtml(c.name)}</strong> `
+        + `<span class="text-muted classroom-card-exam">${c.exam_count}考场</span>`
+        + `<button class="btn-close btn-close-sm ms-1" style="font-size:0.5rem" onclick="event.stopPropagation();unassignClassroom(${c.rc_id}, ${groupId})" title="移除"></button></div>`;
 }
 
 function batchAssignTo(groupId) {
@@ -4834,36 +4855,53 @@ function batchAssignTo(groupId) {
     checked.forEach(cb => {
         const card = cb.closest('.classroom-card');
         if (!card) return;
-        // Move to group drop zone
-        card.querySelector('.classroom-select-cb')?.remove(); // remove checkbox
-        card.style.cssText = 'cursor:grab;display:inline-block;margin:2px';
-        card.classList.remove('p-2', 'mb-1', 'bg-white');
-        card.classList.add('p-1', 'mb-1', 'small');
-        // Add remove button
-        const rcId = parseInt(card.dataset.rcId);
-        const btn = document.createElement('button');
-        btn.className = 'btn-close btn-close-sm ms-1';
-        btn.style.fontSize = '0.5rem';
-        btn.title = '移除';
-        btn.onclick = function(ev) { ev.stopPropagation(); unassignClassroom(rcId, groupId); };
-        card.appendChild(btn);
         dropZone.appendChild(card);
     });
 
-    // Remove empty placeholder if any
-    const placeholder = dropZone.querySelector('.text-muted');
-    if (placeholder && placeholder.textContent.includes('拖放教室')) placeholder.remove();
-
-    updateAllGroupStats();
+    normalizeClassroomAssignmentUi();
     saveAllClassroomAssignments();
 }
 
+function normalizeClassroomAssignmentUi() {
+    document.querySelectorAll('.group-classroom-drop').forEach(area => {
+        const groupId = parseInt(area.dataset.groupId);
+        area.querySelectorAll('.classroom-card').forEach(card => {
+            const rcId = parseInt(card.dataset.rcId);
+            const cData = groupingData.classrooms.find(c => c.rc_id === rcId);
+            if (!cData) return;
+            card.outerHTML = classroomGroupCardHtml(cData, groupId);
+        });
+        const empty = area.querySelector('.group-classroom-empty');
+        if (empty) empty.remove();
+        if (area.querySelectorAll('.classroom-card').length === 0) {
+            area.insertAdjacentHTML('beforeend', `<div class="text-muted small text-center py-2 group-classroom-empty">拖放教室或点「接收已选」</div>`);
+        }
+    });
+
+    document.querySelectorAll('.classroom-zone-section').forEach(section => {
+        if (section.querySelectorAll('.classroom-card').length === 0) section.remove();
+    });
+
+    const pool = document.getElementById('classroomPool');
+    if (pool) {
+        const empty = pool.querySelector('.classroom-pool-empty');
+        if (empty) empty.remove();
+        if (pool.querySelectorAll('.classroom-card').length === 0) {
+            pool.insertAdjacentHTML('beforeend', `<div class="text-muted small text-center py-3 classroom-pool-empty">所有教室已分配完毕</div>`);
+        }
+    }
+
+    updateAllGroupStats();
+}
+
 function updateAllGroupStats() {
+    let assignedCount = 0;
     document.querySelectorAll('.group-classroom-drop').forEach(area => {
         const gid = parseInt(area.dataset.groupId);
         let roomCount = 0, examCount = 0;
         area.querySelectorAll('.classroom-card').forEach(card => {
             roomCount++;
+            assignedCount++;
             examCount += parseInt(card.dataset.examCount) || 0;
         });
         const statEl = document.querySelector(`.group-stats[data-group-id="${gid}"]`);
@@ -4872,19 +4910,11 @@ function updateAllGroupStats() {
         }
     });
 
-    // Update pool: dim assigned cards
-    const allAssigned = new Set();
-    document.querySelectorAll('.group-classroom-drop .classroom-card').forEach(card => {
-        allAssigned.add(parseInt(card.dataset.rcId));
-    });
-    document.querySelectorAll('#classroomPool .classroom-card').forEach(card => {
-        const rid = parseInt(card.dataset.rcId);
-        if (allAssigned.has(rid)) {
-            card.style.opacity = '0.35';
-            card.style.background = '#eee';
-            card.style.pointerEvents = 'none';
-        }
-    });
+    const progress = document.getElementById('classroomAssignmentProgress');
+    if (progress) {
+        const total = groupingData.classrooms.length;
+        progress.textContent = `已分配 ${assignedCount}/${total} 间｜待分配 ${total - assignedCount} 间`;
+    }
 }
 
 async function unassignClassroom(rcId, groupId) {
@@ -4894,60 +4924,114 @@ async function unassignClassroom(rcId, groupId) {
         const pool = document.getElementById('classroomPool');
         if (pool) {
             const cData = groupingData.classrooms.find(c => c.rc_id === rcId);
-            const newCard = document.createElement('div');
-            newCard.className = 'border rounded p-2 mb-1 bg-white classroom-card';
-            newCard.dataset.rcId = rcId;
-            newCard.dataset.examCount = cData ? cData.exam_count : 1;
-            newCard.style.cursor = 'grab';
-            newCard.innerHTML = `<input type="checkbox" class="form-check-input me-1 classroom-select-cb" data-rc-id="${rcId}" style="cursor:pointer" onclick="event.stopPropagation()"><strong class="small">${escapeHtml(cData ? cData.name : '教室')}</strong><span class="small text-muted ms-1">${cData ? cData.exam_count : 1}考场</span>`;
-            pool.appendChild(newCard);
+            if (cData) {
+                let section = Array.from(pool.querySelectorAll('.classroom-zone-section'))
+                    .find(item => item.dataset.zone === cData.zone);
+                if (!section) {
+                    pool.insertAdjacentHTML('beforeend', `<div class="classroom-zone-section" data-zone="${escapeHtml(cData.zone)}"><div class="small text-muted mt-2 mb-1 fw-bold">${escapeHtml(cData.zone)}</div><div class="classroom-zone-list"></div></div>`);
+                    section = Array.from(pool.querySelectorAll('.classroom-zone-section'))
+                        .find(item => item.dataset.zone === cData.zone);
+                    initClassroomPoolSortable(section.querySelector('.classroom-zone-list'));
+                }
+                section.querySelector('.classroom-zone-list').insertAdjacentHTML('beforeend', classroomPoolCardHtml(cData));
+            }
         }
     }
-    updateAllGroupStats();
+    normalizeClassroomAssignmentUi();
     await saveAllClassroomAssignments();
 }
 
+function collectClassroomAssignments() {
+    const assignments = {};
+    document.querySelectorAll('.group-classroom-drop').forEach(area => {
+        assignments[parseInt(area.dataset.groupId)] = Array.from(area.querySelectorAll('.classroom-card'))
+            .map(card => parseInt(card.dataset.rcId));
+    });
+    return assignments;
+}
+
+function changedClassroomGroupIds(assignments) {
+    return groupingData.groups.filter(group => {
+        const current = [...(group.classroom_rc_ids || [])].sort((a, b) => a - b);
+        const next = [...(assignments[group.id] || [])].sort((a, b) => a - b);
+        return current.length !== next.length || current.some((value, index) => value !== next[index]);
+    }).map(group => group.id);
+}
+
+function setClassroomSaveStatus(groupIds, state, message) {
+    const statusClasses = {
+        saving: 'text-warning',
+        saved: 'text-success',
+        failed: 'text-danger',
+    };
+    groupIds.forEach(groupId => {
+        const status = document.querySelector(`.group-save-status[data-group-id="${groupId}"]`);
+        if (!status) return;
+        status.className = `group-save-status ${statusClasses[state]}`;
+        status.textContent = message;
+    });
+    const overall = document.getElementById('classroomAssignmentSaveStatus');
+    if (overall) {
+        overall.className = `small ${statusClasses[state]}`;
+        overall.textContent = message;
+    }
+    const finalizeBtn = document.getElementById('btnSaveTab4b');
+    if (finalizeBtn) finalizeBtn.disabled = state === 'saving';
+}
+
+async function reloadGroupingDataPreservingClassroomScroll() {
+    const poolScroll = document.getElementById('classroomPool')?.scrollTop || 0;
+    const groupScroll = document.getElementById('classroomGroupList')?.scrollTop || 0;
+    await loadGroupingData(currentGroupingRecruitId);
+    requestAnimationFrame(() => {
+        const pool = document.getElementById('classroomPool');
+        const groups = document.getElementById('classroomGroupList');
+        if (pool) pool.scrollTop = poolScroll;
+        if (groups) groups.scrollTop = groupScroll;
+    });
+}
+
 async function saveAllClassroomAssignments() {
-    const csrf = getCsrf();
-    const groupMap = {};
-
-    document.querySelectorAll('.group-classroom-drop').forEach(area => {
-        const gid = parseInt(area.dataset.groupId);
-        const rcIds = [];
-        area.querySelectorAll('.classroom-card').forEach(card => {
-            rcIds.push(parseInt(card.dataset.rcId));
-        });
-        groupMap[gid] = rcIds;
-    });
-
-    // Also include groups with empty classroom drops
-    document.querySelectorAll('.group-classroom-drop').forEach(area => {
-        const gid = parseInt(area.dataset.groupId);
-        if (!(gid in groupMap)) groupMap[gid] = [];
-    });
-
-    const promises = [];
-    for (const [gid, rcIds] of Object.entries(groupMap)) {
-        promises.push(
-            fetch(`/api/recruit/${currentGroupingRecruitId}/groups/${gid}/classrooms`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
-                body: JSON.stringify({ rc_ids: rcIds }),
-            }).then(r => r.json().then(d => ({ ok: r.ok, data: d })))
-        );
+    if (classroomSaveInFlight) {
+        classroomSavePending = true;
+        return;
     }
 
+    const assignments = collectClassroomAssignments();
+    const changedGroupIds = changedClassroomGroupIds(assignments);
+    if (changedGroupIds.length === 0) {
+        setClassroomSaveStatus(groupingData.groups.map(g => g.id), 'saved', '✓ 已保存');
+        return;
+    }
+
+    classroomSaveInFlight = true;
+    setClassroomSaveStatus(changedGroupIds, 'saving', '保存中…');
+
     try {
-        const results = await Promise.all(promises);
-        const failed = results.filter(r => !r.ok);
-        if (failed.length > 0) {
-            showToast(`保存失败：${failed.map(f => f.data.detail || '未知错误').join('；')}`, 'danger');
-            return;
-        }
-        showToast('教室分配已保存', 'success');
-        await loadGroupingData(currentGroupingRecruitId);
+        const res = await fetch(`/api/recruit/${currentGroupingRecruitId}/groups/classrooms`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrf() },
+            body: JSON.stringify({ assignments }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '保存失败');
+
+        groupingData.groups.forEach(group => {
+            group.classroom_rc_ids = [...(assignments[group.id] || [])];
+        });
+        setClassroomSaveStatus(changedGroupIds, 'saved', '✓ 已保存');
+        renderResultTab();
     } catch (err) {
-        showToast('保存失败，请重试', 'danger');
+        classroomSavePending = false;
+        setClassroomSaveStatus(changedGroupIds, 'failed', '保存失败');
+        showToast(`保存失败：${err.message || '请重试'}`, 'danger');
+        await reloadGroupingDataPreservingClassroomScroll();
+    } finally {
+        classroomSaveInFlight = false;
+        if (classroomSavePending) {
+            classroomSavePending = false;
+            saveAllClassroomAssignments();
+        }
     }
 }
 
